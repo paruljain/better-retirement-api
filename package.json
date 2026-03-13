@@ -11,12 +11,16 @@
     "test": "echo \"No tests yet...\""
   },
   "dependencies": {
-    "@azure/functions": "^4.0.0"
+    "@azure/functions": "^4.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "google-auth-library": "^10.6.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongodb": "^7.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.x",
-    "typescript": "^5.0.0",
-    "rimraf": "^5.0.0"
+    "rimraf": "^5.0.0",
+    "typescript": "^5.0.0"
   },
   "main": "dist/src/{index.js,functions/*.js}"
 }
