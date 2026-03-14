@@ -86,7 +86,7 @@ export async function validateGoogleIdToken(request: HttpRequest, context: Invoc
             jwtSecret,
             {
                 subject: payload.sub,
-                expiresIn: '1h'
+                expiresIn: '8h'
             }
         )
 
