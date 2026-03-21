@@ -1,7 +1,11 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { getEmailFromToken, getJwtSecret } from '../lib/auth'
 import { jsonResponse, optionsResponse, isOptionsRequest } from '../lib/http'
-import { getUsersCollection } from '../lib/mongo'
+import { getUserActivityDailyCollection, getUsersCollection } from '../lib/mongo'
+
+function getUtcDateKey(date: Date): string {
+    return date.toISOString().slice(0, 10)
+}
 
 export async function getUser(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
     if (isOptionsRequest(request)) {
@@ -34,7 +38,34 @@ export async function getUser(request: HttpRequest, context: InvocationContext):
             return jsonResponse(request, 404, { error: 'User not found.' })
         }
 
-        return jsonResponse(request, 200, { user })
+        const now = new Date()
+        const activityDate = getUtcDateKey(now)
+        const userActivityDaily = await getUserActivityDailyCollection()
+
+        await Promise.all([
+            users.updateOne(
+                { _id: email },
+                { $set: { lastActiveAt: now } }
+            ),
+            userActivityDaily.updateOne(
+                { _id: `${email}:${activityDate}` },
+                {
+                    $set: {
+                        userId: email,
+                        activityDate,
+                        lastSeenAt: now
+                    }
+                },
+                { upsert: true }
+            )
+        ])
+
+        return jsonResponse(request, 200, {
+            user: {
+                ...user,
+                lastActiveAt: now
+            }
+        })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown MongoDB error.'
         context.error(`Failed to fetch user document: ${message}`)

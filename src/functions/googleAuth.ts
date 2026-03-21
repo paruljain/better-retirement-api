@@ -81,7 +81,8 @@ export async function validateGoogleIdToken(request: HttpRequest, context: Invoc
 
         const apiToken = jwt.sign(
             {
-                email: payload.email
+                email: payload.email,
+                name: payload.name || ''
             },
             jwtSecret,
             {

@@ -4,6 +4,14 @@ export type UserDocument = Document & {
     _id: string
     email: string
     updatedAt: string
+    lastActiveAt?: Date
+}
+
+export type UserActivityDailyDocument = Document & {
+    _id: string
+    userId: string
+    activityDate: string
+    lastSeenAt: Date
 }
 
 let mongoClient: MongoClient | null = null
@@ -16,11 +24,7 @@ function getMongoDatabaseName(): string {
     return process.env.MONGODB_DB_NAME || ''
 }
 
-function getMongoCollectionName(): string {
-    return process.env.MONGODB_USERS_COLLECTION || 'users'
-}
-
-export async function getUsersCollection(): Promise<Collection<UserDocument>> {
+async function getDatabase() {
     const connectionString = getMongoConnectionString()
     const databaseName = getMongoDatabaseName()
 
@@ -33,5 +37,15 @@ export async function getUsersCollection(): Promise<Collection<UserDocument>> {
         await mongoClient.connect()
     }
 
-    return mongoClient.db(databaseName).collection<UserDocument>(getMongoCollectionName())
+    return mongoClient.db(databaseName)
+}
+
+export async function getUsersCollection(): Promise<Collection<UserDocument>> {
+    const database = await getDatabase()
+    return database.collection<UserDocument>('users')
+}
+
+export async function getUserActivityDailyCollection(): Promise<Collection<UserActivityDailyDocument>> {
+    const database = await getDatabase()
+    return database.collection<UserActivityDailyDocument>('userActivityDaily')
 }

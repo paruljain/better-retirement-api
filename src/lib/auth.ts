@@ -3,6 +3,7 @@ import jwt, { JwtPayload } from 'jsonwebtoken'
 
 type AppJwtPayload = JwtPayload & {
     email?: string
+    name?: string
 }
 
 export function getJwtSecret(): string {
@@ -38,4 +39,15 @@ export function getEmailFromToken(request: HttpRequest): string {
     }
 
     return email
+}
+
+export function getNameFromToken(request: HttpRequest): string {
+    const token = readBearerToken(request)
+
+    if (!token) {
+        throw new Error('Missing bearer token.')
+    }
+
+    const payload = verifyAppToken(token)
+    return payload.name?.trim() || ''
 }

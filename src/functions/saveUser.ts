@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { getEmailFromToken, getJwtSecret } from '../lib/auth'
+import { getEmailFromToken, getJwtSecret, getNameFromToken } from '../lib/auth'
 import { jsonResponse, optionsResponse, isOptionsRequest } from '../lib/http'
 import { getUsersCollection } from '../lib/mongo'
 
@@ -22,9 +22,11 @@ export async function saveUser(request: HttpRequest, context: InvocationContext)
     }
 
     let email: string
+    let name: string
 
     try {
         email = getEmailFromToken(request)
+        name = getNameFromToken(request)
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Invalid token.'
         return jsonResponse(request, 401, { error: message })
@@ -42,25 +44,25 @@ export async function saveUser(request: HttpRequest, context: InvocationContext)
         return jsonResponse(request, 400, { error: 'Request body must be a JSON object.' })
     }
 
-    const document = {
-        ...body,
-        _id: email,
-        email,
-        updatedAt: new Date().toISOString()
-    }
-
     try {
         const users = await getUsersCollection()
+        const documentToSave = {
+            ...body,
+            _id: email,
+            email,
+            name,
+            updatedAt: new Date().toISOString()
+        }
 
-        await users.replaceOne(
+        await users.updateOne(
             { _id: email },
-            document,
+            { $set: documentToSave },
             { upsert: true }
         )
 
         return jsonResponse(request, 200, {
             saved: true,
-            user: document
+            user: documentToSave
         })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown MongoDB error.'
