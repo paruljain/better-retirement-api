@@ -104,6 +104,7 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
         const upstreamStream = await client.chat.completions.create({
             ...body,
             model: GEMINI_MODEL,
+            reasoning_effort: 'medium',
             stream: true
         } as OpenAI.Chat.ChatCompletionCreateParamsStreaming)
 
