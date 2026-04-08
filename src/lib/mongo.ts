@@ -14,6 +14,12 @@ export type UserActivityDailyDocument = Document & {
     lastSeenAt: Date
 }
 
+export type UserAiCredentialDocument = Document & {
+    _id: string
+    aiApiKey: string
+    updatedAt: string
+}
+
 let mongoClient: MongoClient | null = null
 
 function getMongoConnectionString(): string {
@@ -48,4 +54,9 @@ export async function getUsersCollection(): Promise<Collection<UserDocument>> {
 export async function getUserActivityDailyCollection(): Promise<Collection<UserActivityDailyDocument>> {
     const database = await getDatabase()
     return database.collection<UserActivityDailyDocument>('userActivityDaily')
+}
+
+export async function getUserAiCredentialsCollection(): Promise<Collection<UserAiCredentialDocument>> {
+    const database = await getDatabase()
+    return database.collection<UserAiCredentialDocument>('userAiCredentials')
 }
