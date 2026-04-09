@@ -12,37 +12,6 @@ type ChatRequestBody = Record<string, unknown> & {
     messages: OpenAI.Chat.ChatCompletionMessageParam[]
 }
 
-function serializeUnknown(value: unknown, seen = new WeakSet<object>()): unknown {
-    if (value === null || value === undefined) {
-        return value
-    }
-
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-        return value
-    }
-
-    if (Array.isArray(value)) {
-        return value.map((item) => serializeUnknown(item, seen))
-    }
-
-    if (typeof value === 'object') {
-        if (seen.has(value)) {
-            return '[Circular]'
-        }
-
-        seen.add(value)
-
-        const result: Record<string, unknown> = {}
-        for (const key of Object.getOwnPropertyNames(value)) {
-            result[key] = serializeUnknown((value as Record<string, unknown>)[key], seen)
-        }
-
-        return result
-    }
-
-    return String(value)
-}
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -158,14 +127,10 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
             ? error.status
             : 502
         const message = error instanceof Error ? error.message : 'Upstream AI request failed.'
-        const serializedError = serializeUnknown(error)
 
         context.error(`Chat proxy request failed for "${email}": ${message}`)
 
-        return jsonResponse(request, status, {
-            error: message || 'Failed to generate chat completion.',
-            upstreamError: serializedError
-        })
+        return jsonResponse(request, status, { error: 'Failed to generate chat completion.' })
     }
 }
 
