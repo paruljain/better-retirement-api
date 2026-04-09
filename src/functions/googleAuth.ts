@@ -3,8 +3,10 @@ import { OAuth2Client, TokenPayload } from 'google-auth-library'
 import jwt from 'jsonwebtoken'
 import { getJwtSecret } from '../lib/auth'
 import { jsonResponse, optionsResponse, isOptionsRequest } from '../lib/http'
+import { getAccessListCollection } from '../lib/mongo'
 
 const googleClient = new OAuth2Client()
+const inviteOnlyMessage = 'Access to this system is currently by invite only. Please send your request to paruljain@hotmail.com'
 
 function getAudience(): string {
     return process.env.GOOGLE_CLIENT_ID || ''
@@ -79,9 +81,22 @@ export async function validateGoogleIdToken(request: HttpRequest, context: Invoc
             return jsonResponse(request, 401, { error: 'Google account email is not verified.' })
         }
 
+        const normalizedEmail = payload.email.trim().toLowerCase()
+        const accessList = await getAccessListCollection()
+        const accessListDocument = await accessList.findOne({})
+        const allowedEmails = Array.isArray(accessListDocument?.emails)
+            ? accessListDocument.emails
+                .filter((email): email is string => typeof email === 'string')
+                .map((email) => email.trim().toLowerCase())
+            : []
+
+        if (!allowedEmails.includes(normalizedEmail)) {
+            return jsonResponse(request, 403, { error: inviteOnlyMessage })
+        }
+
         const apiToken = jwt.sign(
             {
-                email: payload.email,
+                email: normalizedEmail,
                 name: payload.name || ''
             },
             jwtSecret,
