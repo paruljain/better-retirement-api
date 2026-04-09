@@ -12,13 +12,6 @@ type ChatRequestBody = Record<string, unknown> & {
     messages: OpenAI.Chat.ChatCompletionMessageParam[]
 }
 
-type TimingLogDetails = {
-    email?: string
-    requestId?: string
-    elapsedMs: number
-    extra?: Record<string, unknown>
-}
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -34,64 +27,19 @@ function createChatClient(apiKey: string): OpenAI {
     })
 }
 
-function logTiming(context: InvocationContext, step: string, details: TimingLogDetails): void {
-    const suffix = details.extra ? ` ${JSON.stringify(details.extra)}` : ''
-    const emailPart = details.email ? ` email="${details.email}"` : ''
-    const requestIdPart = details.requestId ? ` requestId="${details.requestId}"` : ''
-
-    context.log(`[chat-proxy] ${step}${emailPart}${requestIdPart} elapsedMs=${details.elapsedMs}${suffix}`)
-}
-
-function createSseStream(
-    stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk>,
-    context: InvocationContext,
-    details: {
-        email: string
-        requestId?: string
-        requestStartedAt: number
-        upstreamStartedAt: number
-    }
-): ReadableStream<Uint8Array> {
+function createSseStream(stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk>): ReadableStream<Uint8Array> {
     const encoder = new TextEncoder()
 
     return new ReadableStream<Uint8Array>({
         async start(controller) {
-            let chunkCount = 0
-            let firstChunkAt: number | null = null
-
             try {
                 for await (const chunk of stream) {
-                    chunkCount += 1
-
-                    if (firstChunkAt === null) {
-                        firstChunkAt = Date.now()
-                        logTiming(context, 'upstream-first-chunk', {
-                            email: details.email,
-                            requestId: details.requestId,
-                            elapsedMs: firstChunkAt - details.requestStartedAt,
-                            extra: {
-                                upstreamWaitMs: firstChunkAt - details.upstreamStartedAt
-                            }
-                        })
-                    }
-
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`))
                 }
 
-                logTiming(context, 'upstream-complete', {
-                    email: details.email,
-                    requestId: details.requestId,
-                    elapsedMs: Date.now() - details.requestStartedAt,
-                    extra: {
-                        upstreamDurationMs: Date.now() - details.upstreamStartedAt,
-                        chunkCount
-                    }
-                })
                 controller.enqueue(encoder.encode('data: [DONE]\n\n'))
                 controller.close()
             } catch (error) {
-                const message = error instanceof Error ? error.message : 'Unknown streaming error.'
-                context.error(`[chat-proxy] upstream-stream-error email="${details.email}" requestId="${details.requestId ?? ''}" elapsedMs=${Date.now() - details.requestStartedAt} message="${message}"`)
                 controller.error(error)
             }
         }
@@ -99,9 +47,6 @@ function createSseStream(
 }
 
 export async function proxyChatCompletions(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
-    const requestStartedAt = Date.now()
-    const requestId = request.headers.get('x-ms-request-id') ?? request.headers.get('x-request-id') ?? undefined
-
     if (isOptionsRequest(request)) {
         return optionsResponse(request)
     }
@@ -119,11 +64,6 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
 
     try {
         email = getEmailFromToken(request)
-        logTiming(context, 'jwt-validated', {
-            email,
-            requestId,
-            elapsedMs: Date.now() - requestStartedAt
-        })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Invalid token.'
         return jsonResponse(request, 401, { error: message })
@@ -152,11 +92,6 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
         }
 
         aiApiKey = record.aiApiKey
-        logTiming(context, 'ai-key-loaded', {
-            email,
-            requestId,
-            elapsedMs: Date.now() - requestStartedAt
-        })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown MongoDB error.'
         context.error(`Failed to load user AI key: ${message}`)
@@ -166,15 +101,6 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
 
     try {
         const client = createChatClient(aiApiKey)
-        const upstreamStartedAt = Date.now()
-        logTiming(context, 'upstream-request-started', {
-            email,
-            requestId,
-            elapsedMs: upstreamStartedAt - requestStartedAt,
-            extra: {
-                messageCount: body.messages.length
-            }
-        })
         const upstreamStream = await client.chat.completions.create({
             ...body,
             model: GEMINI_MODEL,
@@ -184,14 +110,6 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
                 include_usage: true
             }
         } as OpenAI.Chat.ChatCompletionCreateParamsStreaming)
-        logTiming(context, 'upstream-stream-opened', {
-            email,
-            requestId,
-            elapsedMs: Date.now() - requestStartedAt,
-            extra: {
-                upstreamOpenMs: Date.now() - upstreamStartedAt
-            }
-        })
 
         return {
             status: 200,
@@ -202,12 +120,7 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
                 'Content-Type': 'text/event-stream; charset=utf-8',
                 'X-Accel-Buffering': 'no'
             },
-            body: createSseStream(upstreamStream, context, {
-                email,
-                requestId,
-                requestStartedAt,
-                upstreamStartedAt
-            })
+            body: createSseStream(upstreamStream)
         }
     } catch (error) {
         const status = typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number'
