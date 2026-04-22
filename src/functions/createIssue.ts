@@ -131,8 +131,6 @@ function buildIssueBody(params: {
         : ''
 
     return [
-        `Issue type: ${type === 'enhancement' ? 'Enhancement request' : 'Bug report'}`,
-        '',
         '## Description',
         description,
         '',
