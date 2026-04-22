@@ -9,16 +9,18 @@ const ISSUE_DESCRIPTION_MAX_LENGTH = 5000
 
 type IssueType = 'bug' | 'enhancement'
 
+type GithubIssueTypeLabel = {
+    name: string
+    color: string
+    description: string
+}
+
 type IssueContext = {
-    route?: string
-    routeName?: string
     currentUrl?: string
     activePlanId?: string
     activePlanName?: string
     appVersion?: string
     schemaVersion?: number | null
-    userAgent?: string
-    language?: string
     timeZone?: string
     viewport?: {
         width?: number
@@ -70,15 +72,11 @@ function sanitizeContext(value: unknown): IssueContext {
         : undefined
 
     return {
-        route: sanitizeOptionalText(value.route),
-        routeName: sanitizeOptionalText(value.routeName),
         currentUrl: sanitizeOptionalText(value.currentUrl, 1000),
         activePlanId: sanitizeOptionalText(value.activePlanId),
         activePlanName: sanitizeOptionalText(value.activePlanName),
         appVersion: sanitizeOptionalText(value.appVersion),
         schemaVersion: Number.isFinite(value.schemaVersion) ? Number(value.schemaVersion) : null,
-        userAgent: sanitizeOptionalText(value.userAgent, 1000),
-        language: sanitizeOptionalText(value.language),
         timeZone: sanitizeOptionalText(value.timeZone),
         viewport
     }
@@ -87,6 +85,30 @@ function sanitizeContext(value: unknown): IssueContext {
 function buildIssueTitle(type: IssueType, title: string): string {
     const prefix = type === 'enhancement' ? '[Enhancement]' : '[Bug]'
     return `${prefix} ${title}`
+}
+
+function getGithubIssueTypeLabel(type: IssueType): GithubIssueTypeLabel {
+    if (type === 'enhancement') {
+        return {
+            name: 'enhancement',
+            color: 'a2eeef',
+            description: 'New feature or request'
+        }
+    }
+
+    return {
+        name: 'bug',
+        color: 'd73a4a',
+        description: 'Something is not working'
+    }
+}
+
+function getGithubReportedFromAppLabel(): GithubIssueTypeLabel {
+    return {
+        name: 'reported-from-app',
+        color: '1d76db',
+        description: 'Submitted through the Better Retirement app'
+    }
 }
 
 function formatLine(label: string, value: string): string {
@@ -104,7 +126,6 @@ function buildIssueBody(params: {
 }): string {
     const { type, description, userName, userEmail, context, request } = params
     const requestUserAgent = sanitizeOptionalText(request.headers.get('user-agent'), 1000)
-    const submittedAt = new Date().toISOString()
     const viewportSummary = context.viewport?.width && context.viewport?.height
         ? `${context.viewport.width} x ${context.viewport.height}`
         : ''
@@ -120,19 +141,14 @@ function buildIssueBody(params: {
         formatLine('Email', userEmail),
         '',
         '## App Context',
-        formatLine('Route', context.route || ''),
-        formatLine('Route Name', context.routeName || ''),
         formatLine('Current URL', context.currentUrl || ''),
         formatLine('Active Plan ID', context.activePlanId || ''),
         formatLine('Active Plan Name', context.activePlanName || ''),
         formatLine('App Version', context.appVersion || ''),
         formatLine('Schema Version', context.schemaVersion == null ? '' : String(context.schemaVersion)),
-        formatLine('Browser Language', context.language || ''),
         formatLine('Browser Time Zone', context.timeZone || ''),
         formatLine('Viewport', viewportSummary),
-        formatLine('Client User Agent', context.userAgent || ''),
-        formatLine('Request User Agent', requestUserAgent),
-        formatLine('Submitted At', submittedAt)
+        formatLine('User Agent', requestUserAgent)
     ].join('\n')
 }
 
@@ -142,6 +158,7 @@ async function createGithubIssue(params: {
     token: string
     title: string
     body: string
+    labels: string[]
 }) {
     const response = await fetch(`https://api.github.com/repos/${params.owner}/${params.repo}/issues`, {
         method: 'POST',
@@ -153,7 +170,8 @@ async function createGithubIssue(params: {
         },
         body: JSON.stringify({
             title: params.title,
-            body: params.body
+            body: params.body,
+            labels: params.labels
         })
     })
 
@@ -172,6 +190,51 @@ async function createGithubIssue(params: {
     }
 
     return payload || {}
+}
+
+async function ensureGithubLabel(params: {
+    owner: string
+    repo: string
+    token: string
+    label: GithubIssueTypeLabel
+}) {
+    const response = await fetch(`https://api.github.com/repos/${params.owner}/${params.repo}/labels`, {
+        method: 'POST',
+        headers: {
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${params.token}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'better-retirement-api'
+        },
+        body: JSON.stringify({
+            name: params.label.name,
+            color: params.label.color,
+            description: params.label.description
+        })
+    })
+
+    if (response.ok) {
+        return
+    }
+
+    const text = await response.text()
+    let payload: Record<string, unknown> | null = null
+
+    try {
+        payload = text ? JSON.parse(text) as Record<string, unknown> : null
+    } catch {
+        payload = null
+    }
+
+    const alreadyExists = Array.isArray(payload?.errors)
+        && payload.errors.some((error) => isPlainObject(error) && error.code === 'already_exists')
+
+    if (response.status === 422 && alreadyExists) {
+        return
+    }
+
+    const githubMessage = typeof payload?.message === 'string' ? payload.message : 'GitHub label creation failed.'
+    throw new Error(githubMessage)
 }
 
 export async function createIssue(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
@@ -234,6 +297,8 @@ export async function createIssue(request: HttpRequest, context: InvocationConte
     }
 
     const githubTitle = buildIssueTitle(issueType, title)
+    const githubLabel = getGithubIssueTypeLabel(issueType)
+    const reportedFromAppLabel = getGithubReportedFromAppLabel()
     const githubBody = buildIssueBody({
         type: issueType,
         title,
@@ -245,12 +310,27 @@ export async function createIssue(request: HttpRequest, context: InvocationConte
     })
 
     try {
+        await ensureGithubLabel({
+            owner: githubOwner,
+            repo: githubRepo,
+            token: githubToken,
+            label: githubLabel
+        })
+
+        await ensureGithubLabel({
+            owner: githubOwner,
+            repo: githubRepo,
+            token: githubToken,
+            label: reportedFromAppLabel
+        })
+
         const githubIssue = await createGithubIssue({
             owner: githubOwner,
             repo: githubRepo,
             token: githubToken,
             title: githubTitle,
-            body: githubBody
+            body: githubBody,
+            labels: [githubLabel.name, reportedFromAppLabel.name]
         })
 
         return jsonResponse(request, 201, {
