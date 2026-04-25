@@ -27,6 +27,17 @@ export type AiChatFeedbackDocument = Document & {
     rating: 'up' | 'down'
 }
 
+export type AiChatPromptDocument = Document & {
+    _id: string
+    title?: string
+    description?: string
+    content: string
+    sourceFile?: string
+    enabled?: boolean
+    updatedAt?: Date
+    updatedBy?: string
+}
+
 export type AccessListDocument = Document & {
     _id: string
     emails: string[]
@@ -77,6 +88,11 @@ export async function getUserAiCredentialsCollection(): Promise<Collection<UserA
 export async function getAiChatFeedbackCollection(): Promise<Collection<AiChatFeedbackDocument>> {
     const database = await getDatabase()
     return database.collection<AiChatFeedbackDocument>('aiChatFeedback')
+}
+
+export async function getAiChatPromptsCollection(): Promise<Collection<AiChatPromptDocument>> {
+    const database = await getDatabase()
+    return database.collection<AiChatPromptDocument>('ai-chat-prompts')
 }
 
 export async function getAccessListCollection(): Promise<Collection<AccessListDocument>> {
