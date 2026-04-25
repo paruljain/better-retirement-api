@@ -20,6 +20,13 @@ export type UserAiCredentialDocument = Document & {
     updatedAt: string
 }
 
+export type AiChatFeedbackDocument = Document & {
+    userId: string
+    userName: string
+    createdAt: string
+    rating: 'up' | 'down'
+}
+
 export type AccessListDocument = Document & {
     _id: string
     emails: string[]
@@ -65,6 +72,11 @@ export async function getUserActivityDailyCollection(): Promise<Collection<UserA
 export async function getUserAiCredentialsCollection(): Promise<Collection<UserAiCredentialDocument>> {
     const database = await getDatabase()
     return database.collection<UserAiCredentialDocument>('userAiCredentials')
+}
+
+export async function getAiChatFeedbackCollection(): Promise<Collection<AiChatFeedbackDocument>> {
+    const database = await getDatabase()
+    return database.collection<AiChatFeedbackDocument>('aiChatFeedback')
 }
 
 export async function getAccessListCollection(): Promise<Collection<AccessListDocument>> {
