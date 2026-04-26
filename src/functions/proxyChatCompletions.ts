@@ -15,6 +15,7 @@ const MAX_TOOL_ROUNDS = 5
 
 type ChatRequestBody = Record<string, unknown> & {
     messages: OpenAI.Chat.ChatCompletionMessageParam[]
+    activePlanId?: string
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -131,7 +132,7 @@ function parseToolArguments(rawArguments: unknown): { sectionIds: string[] } {
     return { sectionIds: [] }
 }
 
-async function buildPromptSectionBundle(sectionIds: string[], user: UserDocument): Promise<string> {
+async function buildPromptSectionBundle(sectionIds: string[], user: UserDocument, activePlanId: string): Promise<string> {
     const uniqueSectionIds = sectionIds
         .map((sectionId) => String(sectionId || '').trim())
         .filter(Boolean)
@@ -153,7 +154,7 @@ async function buildPromptSectionBundle(sectionIds: string[], user: UserDocument
 
     return uniqueSectionIds.map((sectionId) => {
         if (sectionId === ACTIVE_PLAN_DIGEST_SECTION_ID) {
-            return `Section: ${ACTIVE_PLAN_DIGEST_SECTION_ID}\n${buildActivePlanPromptDigest(user)}`
+            return `Section: ${ACTIVE_PLAN_DIGEST_SECTION_ID}\n${buildActivePlanPromptDigest(user, activePlanId)}`
         }
 
         const content = databaseSectionMap.get(sectionId)
@@ -244,11 +245,13 @@ async function* createTextCompletionStream(text: string): AsyncIterable<OpenAI.C
 async function createFinalChatStream({
     client,
     messages,
-    user
+    user,
+    activePlanId
 }: {
     client: OpenAI
     messages: OpenAI.Chat.ChatCompletionMessageParam[]
     user: UserDocument
+    activePlanId: string
 }): Promise<AsyncIterable<OpenAI.Chat.ChatCompletionChunk>> {
     const tools = [getPromptSectionTool()]
     const chatMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -287,7 +290,7 @@ async function createFinalChatStream({
             }
 
             const args = parseToolArguments(toolCall.function.arguments)
-            const sectionBundle = await buildPromptSectionBundle(args.sectionIds, user)
+            const sectionBundle = await buildPromptSectionBundle(args.sectionIds, user, activePlanId)
 
             chatMessages.push({
                 role: 'tool',
@@ -368,6 +371,7 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
     try {
         const client = createChatClient(aiApiKey)
         const messages = sanitizeChatMessages(body.messages)
+        const activePlanId = String(body.activePlanId || '').trim()
 
         if (messages.length === 0) {
             return jsonResponse(request, 400, { error: 'At least one user or assistant message is required.' })
@@ -376,7 +380,8 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
         const upstreamStream = await createFinalChatStream({
             client,
             messages,
-            user: user as UserDocument
+            user: user as UserDocument,
+            activePlanId
         })
 
         return {

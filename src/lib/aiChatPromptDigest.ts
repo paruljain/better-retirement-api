@@ -63,9 +63,12 @@ function getPlans(user: UserDocument): any[] {
     return Array.isArray(user?.plans) ? user.plans : []
 }
 
-function getActivePlan(user: UserDocument): any | null {
+function getActivePlan(user: UserDocument, activePlanId = ''): any | null {
     const plans = getPlans(user)
-    return plans.find((plan) => plan?.id === user?.currentPlanId) || plans[0] || null
+    return plans.find((plan) => plan?.id === activePlanId)
+        || plans.find((plan) => plan?.id === user?.currentPlanId)
+        || plans[0]
+        || null
 }
 
 function getAccountBalance(account: any): number {
@@ -147,8 +150,8 @@ function buildCsvBlock(title: string, headers: string[], rows: CsvRow[]): string
     return `${title}\n${'-'.repeat(title.length)}\n${csv}`
 }
 
-export function buildActivePlanPromptDigest(user: UserDocument): string {
-    const plan = getActivePlan(user)
+export function buildActivePlanPromptDigest(user: UserDocument, activePlanId = ''): string {
+    const plan = getActivePlan(user, activePlanId)
 
     if (!plan) {
         return 'No active plan was found for this user.'
