@@ -18,25 +18,6 @@ function trimString(value: unknown, maxLength = MAX_STRING_LENGTH): string {
     return value.trim().slice(0, maxLength)
 }
 
-function sanitizeValue(value: unknown): unknown {
-    if (typeof value === 'string') {
-        return value.slice(0, MAX_STRING_LENGTH)
-    }
-
-    if (Array.isArray(value)) {
-        return value.map((item) => sanitizeValue(item))
-    }
-
-    if (isPlainObject(value)) {
-        return Object.keys(value).reduce<Record<string, unknown>>((result, key) => {
-            result[key] = sanitizeValue(value[key])
-            return result
-        }, {})
-    }
-
-    return value
-}
-
 export async function saveAiChatFeedback(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
     if (isOptionsRequest(request)) {
         return optionsResponse(request)
@@ -90,13 +71,12 @@ export async function saveAiChatFeedback(request: HttpRequest, context: Invocati
             rating,
             reason: trimString(body.reason, 120),
             comment: trimString(body.comment, MAX_COMMENT_LENGTH),
-            route: sanitizeValue(body.route),
-            browser: sanitizeValue(body.browser),
-            screen: sanitizeValue(body.screen),
-            activePlan: sanitizeValue(body.activePlan),
-            messageId: trimString(body.messageId, 200),
-            assistantMessage: sanitizeValue(body.assistantMessage),
-            chatHistory: sanitizeValue(body.chatHistory),
+            route: trimString(body.route, 1000),
+            browser: trimString(body.browser, 120),
+            screen: trimString(body.screen, 80),
+            activePlan: trimString(body.activePlan, 200),
+            user: trimString(body.user),
+            assistant: trimString(body.assistant),
             appVersion: trimString(body.appVersion, 80)
         }
 

@@ -25,6 +25,15 @@ export type AiChatFeedbackDocument = Document & {
     userName: string
     createdAt: string
     rating: 'up' | 'down'
+    reason?: string
+    comment?: string
+    route?: string
+    browser?: string
+    screen?: string
+    activePlan?: string
+    user?: string
+    assistant?: string
+    appVersion?: string
 }
 
 export type AiChatPromptDocument = Document & {
