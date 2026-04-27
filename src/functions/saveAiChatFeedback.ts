@@ -18,6 +18,43 @@ function trimString(value: unknown, maxLength = MAX_STRING_LENGTH): string {
     return value.trim().slice(0, maxLength)
 }
 
+function decodeHtmlEntities(value: string): string {
+    return value
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/&#(\d+);/g, (_match, codePoint) => {
+            const value = Number(codePoint)
+            return Number.isFinite(value) ? String.fromCodePoint(value) : ''
+        })
+        .replace(/&#x([0-9a-f]+);/gi, (_match, codePoint) => {
+            const value = Number.parseInt(codePoint, 16)
+            return Number.isFinite(value) ? String.fromCodePoint(value) : ''
+        })
+}
+
+function htmlToPlainText(value: unknown, maxLength = MAX_STRING_LENGTH): string {
+    if (typeof value !== 'string') {
+        return ''
+    }
+
+    return decodeHtmlEntities(value)
+        .replace(/<\s*br\s*\/?>/gi, '\n')
+        .replace(/<\s*\/\s*(p|div|li|h[1-6]|blockquote|pre|tr)\s*>/gi, '\n')
+        .replace(/<\s*li\b[^>]*>/gi, '- ')
+        .replace(/<[^>]*>/g, '')
+        .replace(/\r\n/g, '\n')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n[ \t]+/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/[ \t]{2,}/g, ' ')
+        .trim()
+        .slice(0, maxLength)
+}
+
 export async function saveAiChatFeedback(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
     if (isOptionsRequest(request)) {
         return optionsResponse(request)
@@ -76,7 +113,7 @@ export async function saveAiChatFeedback(request: HttpRequest, context: Invocati
             screen: trimString(body.screen, 80),
             activePlan: trimString(body.activePlan, 200),
             user: trimString(body.user),
-            assistant: trimString(body.assistant),
+            assistant: htmlToPlainText(body.assistant),
             appVersion: trimString(body.appVersion, 80)
         }
 
