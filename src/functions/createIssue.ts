@@ -7,7 +7,7 @@ const DEFAULT_GITHUB_REPO = 'better-retirement-issues'
 const ISSUE_TITLE_MAX_LENGTH = 120
 const ISSUE_DESCRIPTION_MAX_LENGTH = 5000
 
-type IssueType = 'bug' | 'enhancement'
+export type IssueType = 'bug' | 'enhancement'
 
 type GithubIssueTypeLabel = {
     name: string
@@ -15,7 +15,9 @@ type GithubIssueTypeLabel = {
     description: string
 }
 
-type IssueContext = {
+export class IssueValidationError extends Error {}
+
+export type IssueContext = {
     currentUrl?: string
     activePlanId?: string
     activePlanName?: string
@@ -28,7 +30,7 @@ type IssueContext = {
     }
 }
 
-type IssueRequestBody = {
+export type IssueRequestBody = {
     type?: string
     title?: string
     description?: string
@@ -235,6 +237,72 @@ async function ensureGithubLabel(params: {
     throw new Error(githubMessage)
 }
 
+export async function createGithubIssueFromReport(params: {
+    request: HttpRequest
+    context: InvocationContext
+    body: IssueRequestBody
+    userEmail: string
+    userName: string
+}): Promise<Record<string, unknown>> {
+    const githubToken = readRequiredEnv('GITHUB_ISSUES_TOKEN')
+    const githubOwner = readRequiredEnv('GITHUB_OWNER') || DEFAULT_GITHUB_OWNER
+    const githubRepo = readRequiredEnv('GITHUB_REPO') || DEFAULT_GITHUB_REPO
+
+    if (!githubToken) {
+        params.context.error('GITHUB_ISSUES_TOKEN is not configured.')
+        throw new Error('Issue reporting is not configured yet.')
+    }
+
+    const issueType = sanitizeIssueType(params.body.type)
+    const title = sanitizeText(params.body.title, ISSUE_TITLE_MAX_LENGTH)
+    const description = sanitizeText(params.body.description, ISSUE_DESCRIPTION_MAX_LENGTH)
+    const sanitizedContext = sanitizeContext(params.body.context)
+
+    if (!title) {
+        throw new IssueValidationError('Issue title is required.')
+    }
+
+    if (!description) {
+        throw new IssueValidationError('Issue description is required.')
+    }
+
+    const githubTitle = buildIssueTitle(issueType, title)
+    const githubLabel = getGithubIssueTypeLabel(issueType)
+    const reportedFromAppLabel = getGithubReportedFromAppLabel()
+    const githubBody = buildIssueBody({
+        type: issueType,
+        title,
+        description,
+        userName: params.userName,
+        userEmail: params.userEmail,
+        context: sanitizedContext,
+        request: params.request
+    })
+
+    await ensureGithubLabel({
+        owner: githubOwner,
+        repo: githubRepo,
+        token: githubToken,
+        label: githubLabel
+    })
+
+    await ensureGithubLabel({
+        owner: githubOwner,
+        repo: githubRepo,
+        token: githubToken,
+        label: reportedFromAppLabel
+    })
+
+    return createGithubIssue({
+        owner: githubOwner,
+        repo: githubRepo,
+        token: githubToken,
+        title: githubTitle,
+        body: githubBody,
+        labels: [githubLabel.name, reportedFromAppLabel.name]
+    })
+}
+
 export async function createIssue(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
     if (isOptionsRequest(request)) {
         return optionsResponse(request)
@@ -247,15 +315,6 @@ export async function createIssue(request: HttpRequest, context: InvocationConte
     if (!getJwtSecret()) {
         context.error('APP_JWT_SECRET is not configured.')
         return jsonResponse(request, 500, { error: 'Server configuration is incomplete.' })
-    }
-
-    const githubToken = readRequiredEnv('GITHUB_ISSUES_TOKEN')
-    const githubOwner = readRequiredEnv('GITHUB_OWNER') || DEFAULT_GITHUB_OWNER
-    const githubRepo = readRequiredEnv('GITHUB_REPO') || DEFAULT_GITHUB_REPO
-
-    if (!githubToken) {
-        context.error('GITHUB_ISSUES_TOKEN is not configured.')
-        return jsonResponse(request, 500, { error: 'Issue reporting is not configured yet.' })
     }
 
     let userEmail: string
@@ -281,54 +340,13 @@ export async function createIssue(request: HttpRequest, context: InvocationConte
         return jsonResponse(request, 400, { error: 'Request body must be a JSON object.' })
     }
 
-    const issueType = sanitizeIssueType(body.type)
-    const title = sanitizeText(body.title, ISSUE_TITLE_MAX_LENGTH)
-    const description = sanitizeText(body.description, ISSUE_DESCRIPTION_MAX_LENGTH)
-    const sanitizedContext = sanitizeContext(body.context)
-
-    if (!title) {
-        return jsonResponse(request, 400, { error: 'Issue title is required.' })
-    }
-
-    if (!description) {
-        return jsonResponse(request, 400, { error: 'Issue description is required.' })
-    }
-
-    const githubTitle = buildIssueTitle(issueType, title)
-    const githubLabel = getGithubIssueTypeLabel(issueType)
-    const reportedFromAppLabel = getGithubReportedFromAppLabel()
-    const githubBody = buildIssueBody({
-        type: issueType,
-        title,
-        description,
-        userName,
-        userEmail,
-        context: sanitizedContext,
-        request
-    })
-
     try {
-        await ensureGithubLabel({
-            owner: githubOwner,
-            repo: githubRepo,
-            token: githubToken,
-            label: githubLabel
-        })
-
-        await ensureGithubLabel({
-            owner: githubOwner,
-            repo: githubRepo,
-            token: githubToken,
-            label: reportedFromAppLabel
-        })
-
-        const githubIssue = await createGithubIssue({
-            owner: githubOwner,
-            repo: githubRepo,
-            token: githubToken,
-            title: githubTitle,
-            body: githubBody,
-            labels: [githubLabel.name, reportedFromAppLabel.name]
+        const githubIssue = await createGithubIssueFromReport({
+            request,
+            context,
+            body,
+            userEmail,
+            userName
         })
 
         return jsonResponse(request, 201, {
@@ -337,6 +355,11 @@ export async function createIssue(request: HttpRequest, context: InvocationConte
         })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown GitHub error.'
+
+        if (error instanceof IssueValidationError) {
+            return jsonResponse(request, 400, { error: message })
+        }
+
         context.error(`Failed to create GitHub issue: ${message}`)
 
         return jsonResponse(request, 502, { error: 'Failed to create the GitHub issue.' })

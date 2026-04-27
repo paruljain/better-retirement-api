@@ -1,21 +1,24 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { ReadableStream } from 'stream/web'
 import OpenAI from 'openai'
-import { getEmailFromToken, getJwtSecret } from '../lib/auth'
+import { getEmailFromToken, getJwtSecret, getNameFromToken } from '../lib/auth'
 import { corsHeaders, isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
 import { buildActivePlanPromptDigest } from '../lib/aiChatPromptDigest'
 import { AiChatPromptDocument, getAiChatPromptsCollection, getUserAiCredentialsCollection, getUsersCollection, UserDocument } from '../lib/mongo'
+import { createGithubIssueFromReport, IssueContext, IssueValidationError } from './createIssue'
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai'
 const GEMINI_MODEL = 'gemini-3-flash-preview'
 const INSTRUCTIONS_PROMPT_ID = 'instructions'
 const ACTIVE_PLAN_DIGEST_SECTION_ID = 'active-plan-digest'
 const GET_PROMPT_SECTIONS_TOOL_NAME = 'get_prompt_sections'
+const CREATE_ISSUE_TOOL_NAME = 'create_issue'
 const MAX_TOOL_ROUNDS = 5
 
 type ChatRequestBody = Record<string, unknown> & {
     messages: OpenAI.Chat.ChatCompletionMessageParam[]
     activePlanId?: string
+    clientContext?: IssueContext
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -132,6 +135,60 @@ function parseToolArguments(rawArguments: unknown): { sectionIds: string[] } {
     return { sectionIds: [] }
 }
 
+function parseJsonObject(rawArguments: unknown): Record<string, unknown> {
+    if (isPlainObject(rawArguments)) {
+        return rawArguments
+    }
+
+    if (typeof rawArguments !== 'string') {
+        return {}
+    }
+
+    try {
+        const parsed = JSON.parse(rawArguments)
+        return isPlainObject(parsed) ? parsed : {}
+    } catch {
+        return {}
+    }
+}
+
+function parseCreateIssueArguments(rawArguments: unknown): {
+    type: 'bug' | 'enhancement'
+    title: string
+    description: string
+} {
+    const parsed = parseJsonObject(rawArguments)
+
+    return {
+        type: parsed.type === 'enhancement' ? 'enhancement' : 'bug',
+        title: typeof parsed.title === 'string' ? parsed.title : '',
+        description: typeof parsed.description === 'string' ? parsed.description : ''
+    }
+}
+
+function sanitizeClientIssueContext(value: unknown): IssueContext {
+    if (!isPlainObject(value)) {
+        return {}
+    }
+
+    const viewport = isPlainObject(value.viewport)
+        ? {
+            width: Number.isFinite(value.viewport.width) ? Number(value.viewport.width) : undefined,
+            height: Number.isFinite(value.viewport.height) ? Number(value.viewport.height) : undefined
+        }
+        : undefined
+
+    return {
+        currentUrl: typeof value.currentUrl === 'string' ? value.currentUrl : '',
+        activePlanId: typeof value.activePlanId === 'string' ? value.activePlanId : '',
+        activePlanName: typeof value.activePlanName === 'string' ? value.activePlanName : '',
+        appVersion: typeof value.appVersion === 'string' ? value.appVersion : '',
+        schemaVersion: Number.isFinite(value.schemaVersion) ? Number(value.schemaVersion) : null,
+        timeZone: typeof value.timeZone === 'string' ? value.timeZone : '',
+        viewport
+    }
+}
+
 async function buildPromptSectionBundle(sectionIds: string[], user: UserDocument, activePlanId: string): Promise<string> {
     const uniqueSectionIds = sectionIds
         .map((sectionId) => String(sectionId || '').trim())
@@ -186,6 +243,36 @@ function getPromptSectionTool(): OpenAI.Chat.ChatCompletionTool {
                     }
                 },
                 required: ['sectionIds']
+            }
+        }
+    }
+}
+
+function getCreateIssueTool(): OpenAI.Chat.ChatCompletionTool {
+    return {
+        type: 'function',
+        function: {
+            name: CREATE_ISSUE_TOOL_NAME,
+            description: 'Create a GitHub issue in the Better Retirement issue tracker after triaging that the user has described a real product defect or a broadly useful enhancement.',
+            parameters: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    type: {
+                        type: 'string',
+                        enum: ['bug', 'enhancement'],
+                        description: 'Use bug for incorrect product behavior and enhancement for broadly useful new product capability.'
+                    },
+                    title: {
+                        type: 'string',
+                        description: 'Short issue title without the [Bug] or [Enhancement] prefix.'
+                    },
+                    description: {
+                        type: 'string',
+                        description: 'Markdown issue body content. Include the same sections you would want in the public tracker, such as summary, user impact, reproduction steps, expected behavior, actual behavior, workaround, and evidence.'
+                    }
+                },
+                required: ['type', 'title', 'description']
             }
         }
     }
@@ -246,14 +333,24 @@ async function createFinalChatStream({
     client,
     messages,
     user,
-    activePlanId
+    activePlanId,
+    clientContext,
+    request,
+    context,
+    userEmail,
+    userName
 }: {
     client: OpenAI
     messages: OpenAI.Chat.ChatCompletionMessageParam[]
     user: UserDocument
     activePlanId: string
+    clientContext: IssueContext
+    request: HttpRequest
+    context: InvocationContext
+    userEmail: string
+    userName: string
 }): Promise<AsyncIterable<OpenAI.Chat.ChatCompletionChunk>> {
-    const tools = [getPromptSectionTool()]
+    const tools = [getPromptSectionTool(), getCreateIssueTool()]
     const chatMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
         {
             role: 'system',
@@ -285,18 +382,68 @@ async function createFinalChatStream({
         chatMessages.push(assistantMessage as OpenAI.Chat.ChatCompletionMessageParam)
 
         for (const toolCall of toolCalls) {
-            if (toolCall.type !== 'function' || toolCall.function?.name !== GET_PROMPT_SECTIONS_TOOL_NAME) {
+            if (toolCall.type !== 'function') {
                 continue
             }
 
-            const args = parseToolArguments(toolCall.function.arguments)
-            const sectionBundle = await buildPromptSectionBundle(args.sectionIds, user, activePlanId)
+            if (toolCall.function?.name === GET_PROMPT_SECTIONS_TOOL_NAME) {
+                const args = parseToolArguments(toolCall.function.arguments)
+                const sectionBundle = await buildPromptSectionBundle(args.sectionIds, user, activePlanId)
 
-            chatMessages.push({
-                role: 'tool',
-                tool_call_id: toolCall.id,
-                content: sectionBundle
-            } as OpenAI.Chat.ChatCompletionMessageParam)
+                chatMessages.push({
+                    role: 'tool',
+                    tool_call_id: toolCall.id,
+                    content: sectionBundle
+                } as OpenAI.Chat.ChatCompletionMessageParam)
+                continue
+            }
+
+            if (toolCall.function?.name === CREATE_ISSUE_TOOL_NAME) {
+                try {
+                    const args = parseCreateIssueArguments(toolCall.function.arguments)
+                    const githubIssue = await createGithubIssueFromReport({
+                        request,
+                        context,
+                        body: {
+                            type: args.type,
+                            title: args.title,
+                            description: args.description,
+                            context: {
+                                ...clientContext,
+                                activePlanId: clientContext.activePlanId || activePlanId
+                            }
+                        },
+                        userEmail,
+                        userName
+                    })
+
+                    chatMessages.push({
+                        role: 'tool',
+                        tool_call_id: toolCall.id,
+                        content: JSON.stringify({
+                            ok: true,
+                            issueNumber: githubIssue.number,
+                            issueUrl: githubIssue.html_url
+                        })
+                    } as OpenAI.Chat.ChatCompletionMessageParam)
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : 'Issue creation failed.'
+                    const isValidationError = error instanceof IssueValidationError
+
+                    if (!isValidationError) {
+                        context.error(`AI chat issue creation failed for "${userEmail}": ${message}`)
+                    }
+
+                    chatMessages.push({
+                        role: 'tool',
+                        tool_call_id: toolCall.id,
+                        content: JSON.stringify({
+                            ok: false,
+                            error: isValidationError ? message : 'Could not create the issue.'
+                        })
+                    } as OpenAI.Chat.ChatCompletionMessageParam)
+                }
+            }
         }
     }
 
@@ -318,9 +465,11 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
     }
 
     let email: string
+    let userName: string
 
     try {
         email = getEmailFromToken(request)
+        userName = getNameFromToken(request)
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Invalid token.'
         return jsonResponse(request, 401, { error: message })
@@ -372,6 +521,7 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
         const client = createChatClient(aiApiKey)
         const messages = sanitizeChatMessages(body.messages)
         const activePlanId = String(body.activePlanId || '').trim()
+        const clientContext = sanitizeClientIssueContext(body.clientContext)
 
         if (messages.length === 0) {
             return jsonResponse(request, 400, { error: 'At least one user or assistant message is required.' })
@@ -381,7 +531,12 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
             client,
             messages,
             user: user as UserDocument,
-            activePlanId
+            activePlanId,
+            clientContext,
+            request,
+            context,
+            userEmail: email,
+            userName
         })
 
         return {
