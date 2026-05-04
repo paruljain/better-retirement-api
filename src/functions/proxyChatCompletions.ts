@@ -10,6 +10,7 @@ import { createGithubIssueFromReport, IssueContext, IssueValidationError } from 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai'
 const GEMINI_MODEL = 'gemini-3-flash-preview'
 const INSTRUCTIONS_PROMPT_ID = 'instructions'
+const ALWAYS_INCLUDED_PROMPT_IDS = ['plan-manager']
 const ACTIVE_PLAN_DIGEST_SECTION_ID = 'active-plan-digest'
 const GET_PROMPT_SECTIONS_TOOL_NAME = 'get_prompt_sections'
 const CREATE_ISSUE_TOOL_NAME = 'create_issue'
@@ -102,10 +103,20 @@ async function buildSystemPrompt(): Promise<string> {
         throw new Error('AI chat instructions prompt is missing.')
     }
 
+    const alwaysIncludedSections = ALWAYS_INCLUDED_PROMPT_IDS
+        .map((sectionId) => promptSections.find((section) => section._id === sectionId && section.enabled !== false))
+        .filter((section): section is AiChatPromptDocument => Boolean(section))
+        .map((section) => `Section: ${section._id}\n${String(section.content || '').trim()}`)
+        .filter(Boolean)
+        .join('\n\n')
+
     return `${instructionsContent}
 
 Available prompt sections:
 ${buildPromptSectionCatalogText(promptSections)}
+
+Always-loaded prompt sections:
+${alwaysIncludedSections || 'None'}
 
 Use the ${GET_PROMPT_SECTIONS_TOOL_NAME} tool to retrieve any sections needed before answering. Do not ask the user to retrieve prompt sections.`
 }
