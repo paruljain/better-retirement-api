@@ -13,7 +13,7 @@ const INSTRUCTIONS_PROMPT_ID = 'instructions'
 const ACTIVE_PLAN_DIGEST_SECTION_ID = 'active-plan-digest'
 const GET_PROMPT_SECTIONS_TOOL_NAME = 'get_prompt_sections'
 const CREATE_ISSUE_TOOL_NAME = 'create_issue'
-const MAX_TOOL_ROUNDS = 10
+const MAX_TOOL_ROUNDS = 5
 
 type ChatRequestBody = Record<string, unknown> & {
     messages: OpenAI.Chat.ChatCompletionMessageParam[]
