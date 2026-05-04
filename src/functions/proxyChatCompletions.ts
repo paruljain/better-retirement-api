@@ -356,14 +356,14 @@ async function createFinalChatStream({
     userName: string
 }): Promise<AsyncIterable<OpenAI.Chat.ChatCompletionChunk>> {
     const tools = [getPromptSectionTool(), getCreateIssueTool()]
+    const systemPrompt = [
+        await buildSystemPrompt(),
+        buildRuntimeContextText(clientContext, activePlanId, activePlanSnapshot)
+    ].join('\n\n')
     const chatMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
         {
             role: 'system',
-            content: await buildSystemPrompt()
-        },
-        {
-            role: 'system',
-            content: buildRuntimeContextText(clientContext, activePlanId, activePlanSnapshot)
+            content: systemPrompt
         },
         ...messages
     ]
