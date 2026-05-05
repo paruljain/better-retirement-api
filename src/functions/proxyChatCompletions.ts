@@ -300,38 +300,6 @@ function createSseStream(stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk>)
     })
 }
 
-async function* createTextCompletionStream(text: string): AsyncIterable<OpenAI.Chat.ChatCompletionChunk> {
-    yield {
-        id: `chatcmpl-${Date.now()}`,
-        object: 'chat.completion.chunk',
-        created: Math.floor(Date.now() / 1000),
-        model: GEMINI_MODEL,
-        choices: [
-            {
-                index: 0,
-                delta: {
-                    content: text
-                },
-                finish_reason: null
-            }
-        ]
-    } as OpenAI.Chat.ChatCompletionChunk
-
-    yield {
-        id: `chatcmpl-${Date.now()}`,
-        object: 'chat.completion.chunk',
-        created: Math.floor(Date.now() / 1000),
-        model: GEMINI_MODEL,
-        choices: [
-            {
-                index: 0,
-                delta: {},
-                finish_reason: 'stop'
-            }
-        ]
-    } as OpenAI.Chat.ChatCompletionChunk
-}
-
 async function createFinalChatStream({
     client,
     messages,
@@ -385,7 +353,12 @@ async function createFinalChatStream({
         }
 
         if (toolCalls.length === 0) {
-            return createTextCompletionStream(getTextContent(assistantMessage.content))
+            return client.chat.completions.create({
+                model: GEMINI_MODEL,
+                reasoning_effort: 'medium',
+                messages: chatMessages,
+                stream: true
+            } as OpenAI.Chat.ChatCompletionCreateParamsStreaming)
         }
 
         chatMessages.push(assistantMessage as OpenAI.Chat.ChatCompletionMessageParam)
