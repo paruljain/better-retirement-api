@@ -63,20 +63,8 @@ function getPlans(user: UserDocument): any[] {
     return Array.isArray(user?.plans) ? user.plans : []
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function getActivePlan(user: UserDocument, activePlanId = '', activePlanSnapshot: unknown = null): any | null {
+function getActivePlan(user: UserDocument, activePlanId = ''): any | null {
     const plans = getPlans(user)
-
-    if (isPlainObject(activePlanSnapshot)) {
-        const snapshotId = typeof activePlanSnapshot.id === 'string' ? activePlanSnapshot.id : ''
-
-        if (!activePlanId || snapshotId === activePlanId) {
-            return activePlanSnapshot
-        }
-    }
 
     return plans.find((plan) => plan?.id === activePlanId)
         || plans.find((plan) => plan?.id === user?.currentPlanId)
@@ -163,8 +151,8 @@ function buildCsvBlock(title: string, headers: string[], rows: CsvRow[]): string
     return `${title}\n${'-'.repeat(title.length)}\n${csv}`
 }
 
-export function buildActivePlanPromptDigest(user: UserDocument, activePlanId = '', activePlanSnapshot: unknown = null): string {
-    const plan = getActivePlan(user, activePlanId, activePlanSnapshot)
+export function buildActivePlanPromptDigest(user: UserDocument, activePlanId = ''): string {
+    const plan = getActivePlan(user, activePlanId)
 
     if (!plan) {
         return 'No active plan was found for this user.'

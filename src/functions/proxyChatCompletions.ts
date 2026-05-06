@@ -18,7 +18,6 @@ const MAX_TOOL_ROUNDS = 5
 type ChatRequestBody = Record<string, unknown> & {
     messages: OpenAI.Chat.ChatCompletionMessageParam[]
     activePlanId?: string
-    activePlanSnapshot?: Record<string, unknown> | null
     clientContext?: IssueContext
 }
 
@@ -164,21 +163,8 @@ function sanitizeClientIssueContext(value: unknown): IssueContext {
     }
 }
 
-function sanitizeActivePlanSnapshot(value: unknown, activePlanId: string): Record<string, unknown> | null {
-    if (!isPlainObject(value)) {
-        return null
-    }
-
-    const snapshotId = typeof value.id === 'string' ? value.id : ''
-    if (activePlanId && snapshotId && snapshotId !== activePlanId) {
-        return null
-    }
-
-    return value
-}
-
-function buildRuntimeContextText(clientContext: IssueContext, activePlanId: string, activePlanSnapshot: Record<string, unknown> | null): string {
-    const activePlanName = String(clientContext.activePlanName || activePlanSnapshot?.planName || '').trim()
+function buildRuntimeContextText(clientContext: IssueContext, activePlanId: string): string {
+    const activePlanName = String(clientContext.activePlanName || '').trim()
     const contextLines = [
         'Runtime client context for this request:',
         `- Active Plan ID: ${activePlanId || clientContext.activePlanId || 'unknown'}`,
@@ -192,7 +178,7 @@ function buildRuntimeContextText(clientContext: IssueContext, activePlanId: stri
     return `${contextLines.join('\n')}\n\nWhen the user asks which plan is active, answer from this runtime context. If plan details are needed, request the ${ACTIVE_PLAN_DIGEST_SECTION_ID} section.`
 }
 
-async function buildPromptSectionBundle(sectionIds: string[], user: UserDocument, activePlanId: string, activePlanSnapshot: Record<string, unknown> | null): Promise<string> {
+async function buildPromptSectionBundle(sectionIds: string[], user: UserDocument, activePlanId: string): Promise<string> {
     const uniqueSectionIds = sectionIds
         .map((sectionId) => String(sectionId || '').trim())
         .filter(Boolean)
@@ -214,7 +200,7 @@ async function buildPromptSectionBundle(sectionIds: string[], user: UserDocument
 
     return uniqueSectionIds.map((sectionId) => {
         if (sectionId === ACTIVE_PLAN_DIGEST_SECTION_ID) {
-            return `Section: ${ACTIVE_PLAN_DIGEST_SECTION_ID}\n${buildActivePlanPromptDigest(user, activePlanId, activePlanSnapshot)}`
+            return `Section: ${ACTIVE_PLAN_DIGEST_SECTION_ID}\n${buildActivePlanPromptDigest(user, activePlanId)}`
         }
 
         const content = databaseSectionMap.get(sectionId)
@@ -305,7 +291,6 @@ async function createFinalChatStream({
     messages,
     user,
     activePlanId,
-    activePlanSnapshot,
     clientContext,
     request,
     context,
@@ -316,7 +301,6 @@ async function createFinalChatStream({
     messages: OpenAI.Chat.ChatCompletionMessageParam[]
     user: UserDocument
     activePlanId: string
-    activePlanSnapshot: Record<string, unknown> | null
     clientContext: IssueContext
     request: HttpRequest
     context: InvocationContext
@@ -326,7 +310,7 @@ async function createFinalChatStream({
     const tools = [getPromptSectionTool(), getCreateIssueTool()]
     const systemPrompt = [
         await buildSystemPrompt(),
-        buildRuntimeContextText(clientContext, activePlanId, activePlanSnapshot)
+        buildRuntimeContextText(clientContext, activePlanId)
     ].join('\n\n')
     const chatMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
         {
@@ -370,7 +354,7 @@ async function createFinalChatStream({
 
             if (toolCall.function?.name === GET_PROMPT_SECTIONS_TOOL_NAME) {
                 const args = parseToolArguments(toolCall.function.arguments)
-                const sectionBundle = await buildPromptSectionBundle(args.sectionIds, user, activePlanId, activePlanSnapshot)
+                const sectionBundle = await buildPromptSectionBundle(args.sectionIds, user, activePlanId)
 
                 chatMessages.push({
                     role: 'tool',
@@ -503,7 +487,6 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
         const client = createChatClient(aiApiKey)
         const messages = sanitizeChatMessages(body.messages)
         const activePlanId = String(body.activePlanId || '').trim()
-        const activePlanSnapshot = sanitizeActivePlanSnapshot(body.activePlanSnapshot, activePlanId)
         const clientContext = sanitizeClientIssueContext(body.clientContext)
 
         if (messages.length === 0) {
@@ -515,7 +498,6 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
             messages,
             user: user as UserDocument,
             activePlanId,
-            activePlanSnapshot,
             clientContext,
             request,
             context,
