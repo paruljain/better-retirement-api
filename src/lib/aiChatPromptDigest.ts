@@ -4,6 +4,7 @@ type CsvRow = Array<string | number | null | undefined>
 
 const MAX_CHART_YEARS = 120
 const MAX_CHART_ROWS = 20
+const HSA_ACCOUNT_TAX_STATUS = 'hsa'
 
 function roundDollars(value: unknown): number {
     const amount = Number(value || 0)
@@ -127,6 +128,68 @@ function getAccountRows(accounts: any[]): CsvRow[] {
         formatPercent(account?.growthRate ?? account?.apy),
         formatPercent(account?.dividendRate)
     ])
+}
+
+function getFundableAccounts(accounts: any[]): any[] {
+    return (accounts || []).filter((account) => (
+        (account?.type === 'interest-account' || account?.type === 'investment-account')
+        && account?.taxStatus !== HSA_ACCOUNT_TAX_STATUS
+    ))
+}
+
+function getDefaultWithdrawalSettings() {
+    return {
+        enabled: true,
+        minimumBalance: 0,
+        availableFromYearReference: null
+    }
+}
+
+function getWithdrawalSettings(accountFlow: any, accountId: string) {
+    return {
+        ...getDefaultWithdrawalSettings(),
+        ...(accountFlow?.withdrawalSettingsByAccountId?.[accountId] || {})
+    }
+}
+
+function getOrderedWithdrawalAccounts(accountFlow: any, accounts: any[]): any[] {
+    const fundableAccounts = getFundableAccounts(accounts)
+    const accountMap = new Map(fundableAccounts.map((account) => [account.id, account]))
+    const withdrawalOrder = Array.isArray(accountFlow?.expenseWithdrawalOrder)
+        ? accountFlow.expenseWithdrawalOrder
+        : []
+    const orderedAccounts = withdrawalOrder
+        .map((accountId) => accountMap.get(accountId))
+        .filter(Boolean)
+    const orderedAccountIds = new Set(orderedAccounts.map((account) => account.id))
+
+    fundableAccounts.forEach((account) => {
+        if (!orderedAccountIds.has(account.id)) {
+            orderedAccounts.push(account)
+        }
+    })
+
+    return orderedAccounts
+}
+
+function getWithdrawalOrderRows(accountFlow: any, accounts: any[]): CsvRow[] {
+    return getOrderedWithdrawalAccounts(accountFlow, accounts).map((account, index) => {
+        const settings = getWithdrawalSettings(accountFlow, account.id)
+        const availableFromYearReference = settings.availableFromYearReference || null
+
+        return [
+            index + 1,
+            account?.name || '',
+            account?.type || '',
+            account?.taxStatus || '',
+            formatOwner(account?.owner),
+            settings.enabled === false ? 'No' : 'Yes',
+            roundDollars(settings.minimumBalance),
+            availableFromYearReference?.mode || '',
+            availableFromYearReference?.value ?? '',
+            availableFromYearReference?.month ?? ''
+        ]
+    })
 }
 
 function getCashFlowRows(items: any[]): CsvRow[] {
@@ -377,6 +440,11 @@ export function buildActivePlanPromptDigest(user: UserDocument, activePlanId = '
             'Healthcare Configuration',
             ['owner', 'coverageType', 'startYearReferenceMode', 'startYearReferenceValue', 'startYearReferenceMonth', 'startYear', 'endYearReferenceMode', 'endYearReferenceValue', 'endYearReferenceMonth', 'endYear', 'premiumAmount', 'premiumFrequency', 'inflationRate', 'medicareAdvantageAmount', 'medigapAmount', 'otherMedicareAddOnAmount', 'addOnFrequency', 'premiumCashFlowTreatment', 'payFromHsaFirst', 'notes'],
             getHealthcareConfigRows(medicalEntries)
+        ),
+        buildCsvBlock(
+            'Withdrawal Order',
+            ['order', 'accountName', 'accountType', 'taxStatus', 'owner', 'enabled', 'minimumBalance', 'availableFromYearReferenceMode', 'availableFromYearReferenceValue', 'availableFromYearReferenceMonth'],
+            getWithdrawalOrderRows(plan.accountFlow, accounts)
         ),
         buildCsvBlock(
             'Transfers',
