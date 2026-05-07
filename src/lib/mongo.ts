@@ -53,6 +53,13 @@ export type AccessListDocument = Document & {
     updatedAt?: string
 }
 
+export type AppConfigDocument = Document & {
+    _id: string
+    schemaVersion?: number
+    plans?: Document[]
+    updatedAt?: string
+}
+
 let mongoClient: MongoClient | null = null
 
 function getMongoConnectionString(): string {
@@ -107,4 +114,9 @@ export async function getAiChatPromptsCollection(): Promise<Collection<AiChatPro
 export async function getAccessListCollection(): Promise<Collection<AccessListDocument>> {
     const database = await getDatabase()
     return database.collection<AccessListDocument>('accessList')
+}
+
+export async function getAppConfigCollection(): Promise<Collection<AppConfigDocument>> {
+    const database = await getDatabase()
+    return database.collection<AppConfigDocument>('appConfig')
 }

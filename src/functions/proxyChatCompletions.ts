@@ -4,6 +4,7 @@ import OpenAI from 'openai'
 import { getEmailFromToken, getJwtSecret, getNameFromToken } from '../lib/auth'
 import { corsHeaders, isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
 import { buildActivePlanPromptDigest } from '../lib/aiChatPromptDigest'
+import { DEMO_PLAN_ID, getDemoUserDocument } from '../lib/demoPlan'
 import { AiChatPromptDocument, getAiChatPromptsCollection, getUserAiCredentialsCollection, getUsersCollection, UserDocument } from '../lib/mongo'
 import { createGithubIssueFromReport, IssueContext, IssueValidationError } from './createIssue'
 
@@ -166,6 +167,10 @@ function sanitizeClientIssueContext(value: unknown): IssueContext {
 
 function sanitizeComputedContext(value: unknown): Record<string, unknown> {
     return isPlainObject(value) ? value : {}
+}
+
+function hasPlan(user: UserDocument | null, planId: string): boolean {
+    return Array.isArray(user?.plans) && user.plans.some((plan) => plan?.id === planId)
 }
 
 function buildRuntimeContextText(clientContext: IssueContext, activePlanId: string): string {
@@ -460,8 +465,10 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
         return jsonResponse(request, 400, { error: 'Request body must be a JSON object with a messages array.' })
     }
 
+    const activePlanId = String(body.activePlanId || '').trim()
     let aiApiKey = ''
     let user: UserDocument | null = null
+    let promptUser: UserDocument | null = null
 
     try {
         const [credentials, users] = await Promise.all([
@@ -483,6 +490,15 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
 
         aiApiKey = record.aiApiKey
         user = userRecord
+        promptUser = userRecord
+
+        if (activePlanId === DEMO_PLAN_ID && !hasPlan(userRecord, activePlanId)) {
+            promptUser = await getDemoUserDocument()
+
+            if (!promptUser) {
+                return jsonResponse(request, 404, { error: 'Demo plan configuration was not found.' })
+            }
+        }
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown MongoDB error.'
         context.error(`Failed to load chat context: ${message}`)
@@ -493,7 +509,6 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
     try {
         const client = createChatClient(aiApiKey)
         const messages = sanitizeChatMessages(body.messages)
-        const activePlanId = String(body.activePlanId || '').trim()
         const computedContext = sanitizeComputedContext(body.computedContext)
         const clientContext = sanitizeClientIssueContext(body.clientContext)
 
@@ -504,7 +519,7 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
         const upstreamStream = await createFinalChatStream({
             client,
             messages,
-            user: user as UserDocument,
+            user: promptUser as UserDocument,
             activePlanId,
             computedContext,
             clientContext,
