@@ -24,6 +24,16 @@ function formatPercent(value: unknown): string {
     return `${amount.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')}%`
 }
 
+function formatChanceOfSuccess(value: unknown): string {
+    const amount = Number(value)
+
+    if (!Number.isFinite(amount)) {
+        return ''
+    }
+
+    return Math.round(amount) >= 100 ? '99%+' : formatPercent(amount)
+}
+
 function formatMaybeNumber(value: unknown): string {
     const amount = Number(value)
     return Number.isFinite(amount) ? String(amount) : ''
@@ -211,7 +221,7 @@ function formatMonteCarloSection(computedContext: unknown): string {
     return [
         'Monte Carlo',
         '-----------',
-        `Chance of Success: ${formatPercent(monteCarlo?.successRate) || 'N/A'}`,
+        `Chance of Success: ${formatChanceOfSuccess(monteCarlo?.successRate) || 'N/A'}`,
         `Generated At: ${getStringValue(monteCarlo?.generatedAt) || 'N/A'}`,
         `Iterations: ${formatMaybeNumber(monteCarlo?.iterations) || 'N/A'}`,
         `Start Year: ${formatMaybeNumber(monteCarlo?.startYear) || 'N/A'}`,
