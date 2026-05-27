@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { createHash } from 'crypto'
 import { getEmailFromToken, getJwtSecret } from '../lib/auth'
 import { decryptSecret, encryptSecret, hasAppEncryptionKey } from '../lib/encryption'
 import { isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
@@ -27,6 +28,12 @@ function sanitizeEnvironment(value: unknown): PlaidEnvironment {
     return PLAID_ENVIRONMENTS.includes(value as PlaidEnvironment)
         ? value as PlaidEnvironment
         : 'production'
+}
+
+function getPlaidClientUserId(email: string): string {
+    return createHash('sha256')
+        .update(`better-retirement:plaid:${email.trim().toLowerCase()}`)
+        .digest('hex')
 }
 
 function getRequiredAuthEmail(request: HttpRequest, context: InvocationContext): string | HttpResponseInit {
@@ -296,7 +303,7 @@ export async function createPlaidLinkToken(request: HttpRequest, context: Invoca
             language: 'en',
             products: ['auth'],
             user: {
-                client_user_id: authEmail
+                client_user_id: getPlaidClientUserId(authEmail)
             }
         }
 
