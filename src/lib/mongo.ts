@@ -24,6 +24,52 @@ export type UserAiCredentialDocument = Document & {
     updatedAt: string
 }
 
+export type PlaidAccountSnapshot = {
+    accountId: string
+    name: string
+    officialName?: string
+    mask?: string
+    type?: string
+    subtype?: string
+    balances?: {
+        available?: number | null
+        current?: number | null
+        limit?: number | null
+        isoCurrencyCode?: string | null
+        unofficialCurrencyCode?: string | null
+    }
+}
+
+export type PlaidConnectionItem = {
+    itemId: string
+    institutionId?: string
+    institutionName?: string
+    accessTokenEncrypted: string
+    accessTokenIv: string
+    accessTokenTag: string
+    accessTokenKeyVersion: string
+    accounts: PlaidAccountSnapshot[]
+    createdAt: string
+    updatedAt: string
+    lastSyncedAt?: string
+    lastError?: string
+}
+
+export type UserPlaidConnectionDocument = Document & {
+    _id: string
+    plaidClientIdEncrypted?: string
+    plaidClientIdIv?: string
+    plaidClientIdTag?: string
+    plaidClientIdKeyVersion?: string
+    plaidSecretEncrypted?: string
+    plaidSecretIv?: string
+    plaidSecretTag?: string
+    plaidSecretKeyVersion?: string
+    environment?: 'sandbox' | 'development' | 'production'
+    items?: PlaidConnectionItem[]
+    updatedAt: string
+}
+
 export type AiChatFeedbackDocument = Document & {
     userId: string
     userName: string
@@ -103,6 +149,11 @@ export async function getUserActivityDailyCollection(): Promise<Collection<UserA
 export async function getUserAiCredentialsCollection(): Promise<Collection<UserAiCredentialDocument>> {
     const database = await getDatabase()
     return database.collection<UserAiCredentialDocument>('userAiCredentials')
+}
+
+export async function getUserPlaidConnectionsCollection(): Promise<Collection<UserPlaidConnectionDocument>> {
+    const database = await getDatabase()
+    return database.collection<UserPlaidConnectionDocument>('userPlaidConnections')
 }
 
 export async function getAiChatFeedbackCollection(): Promise<Collection<AiChatFeedbackDocument>> {
