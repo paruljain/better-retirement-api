@@ -8,6 +8,8 @@
     "clean": "rimraf dist",
     "prestart": "npm run clean && npm run build",
     "start": "func start",
+    "backup:user-ai-credentials": "node tools/backup-user-ai-credentials.js",
+    "migrate:user-ai-credentials": "node tools/migrate-user-ai-credentials.js",
     "test": "echo \"No tests yet...\""
   },
   "dependencies": {

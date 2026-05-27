@@ -16,7 +16,11 @@ export type UserActivityDailyDocument = Document & {
 
 export type UserAiCredentialDocument = Document & {
     _id: string
-    aiApiKey: string
+    aiApiKey?: string
+    aiApiKeyEncrypted?: string
+    aiApiKeyIv?: string
+    aiApiKeyTag?: string
+    aiApiKeyKeyVersion?: string
     updatedAt: string
 }
 

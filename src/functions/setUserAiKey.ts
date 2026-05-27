@@ -1,5 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { getEmailFromToken, getJwtSecret } from '../lib/auth'
+import { encryptSecret, hasAppEncryptionKey } from '../lib/encryption'
 import { isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
 import { getUserAiCredentialsCollection } from '../lib/mongo'
 
@@ -18,6 +19,11 @@ export async function setUserAiKey(request: HttpRequest, context: InvocationCont
 
     if (!getJwtSecret()) {
         context.error('APP_JWT_SECRET is not configured.')
+        return jsonResponse(request, 500, { error: 'Server configuration is incomplete.' })
+    }
+
+    if (!hasAppEncryptionKey()) {
+        context.error('APP_ENCRYPTION_KEY is not configured.')
         return jsonResponse(request, 500, { error: 'Server configuration is incomplete.' })
     }
 
@@ -50,14 +56,21 @@ export async function setUserAiKey(request: HttpRequest, context: InvocationCont
 
     try {
         const credentials = await getUserAiCredentialsCollection()
+        const encryptedApiKey = encryptSecret(aiApiKey, `userAiCredentials:${email}:aiApiKey`)
 
         await credentials.updateOne(
             { _id: email },
             {
                 $set: {
                     _id: email,
-                    aiApiKey,
+                    aiApiKeyEncrypted: encryptedApiKey.encryptedValue,
+                    aiApiKeyIv: encryptedApiKey.iv,
+                    aiApiKeyTag: encryptedApiKey.tag,
+                    aiApiKeyKeyVersion: encryptedApiKey.keyVersion,
                     updatedAt: new Date().toISOString()
+                },
+                $unset: {
+                    aiApiKey: ''
                 }
             },
             { upsert: true }

@@ -2,10 +2,11 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { ReadableStream } from 'stream/web'
 import OpenAI from 'openai'
 import { getEmailFromToken, getJwtSecret, getNameFromToken } from '../lib/auth'
+import { decryptSecret } from '../lib/encryption'
 import { corsHeaders, isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
 import { buildActivePlanPromptDigest } from '../lib/aiChatPromptDigest'
 import { DEMO_PLAN_ID, getDemoUserDocument } from '../lib/demoPlan'
-import { AiChatPromptDocument, getAiChatPromptsCollection, getUserAiCredentialsCollection, getUsersCollection, UserDocument } from '../lib/mongo'
+import { AiChatPromptDocument, getAiChatPromptsCollection, getUserAiCredentialsCollection, getUsersCollection, UserAiCredentialDocument, UserDocument } from '../lib/mongo'
 import { createGithubIssueFromReport, IssueContext, IssueValidationError } from './createIssue'
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai'
@@ -36,6 +37,19 @@ function createChatClient(apiKey: string): OpenAI {
         apiKey,
         baseURL: GEMINI_BASE_URL
     })
+}
+
+function getSavedAiApiKey(record: UserAiCredentialDocument, email: string): string {
+    if (record.aiApiKeyEncrypted && record.aiApiKeyIv && record.aiApiKeyTag && record.aiApiKeyKeyVersion) {
+        return decryptSecret({
+            encryptedValue: record.aiApiKeyEncrypted,
+            iv: record.aiApiKeyIv,
+            tag: record.aiApiKeyTag,
+            keyVersion: record.aiApiKeyKeyVersion
+        }, `userAiCredentials:${email}:aiApiKey`)
+    }
+
+    return String(record.aiApiKey || '').trim()
 }
 
 function getTextContent(value: unknown): string {
@@ -480,7 +494,13 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
             users.findOne({ _id: email })
         ])
 
-        if (!record?.aiApiKey) {
+        if (!record) {
+            return jsonResponse(request, 404, { error: 'No AI API key has been saved for this user.' })
+        }
+
+        aiApiKey = getSavedAiApiKey(record, email)
+
+        if (!aiApiKey) {
             return jsonResponse(request, 404, { error: 'No AI API key has been saved for this user.' })
         }
 
@@ -488,7 +508,6 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
             return jsonResponse(request, 404, { error: 'User not found.' })
         }
 
-        aiApiKey = record.aiApiKey
         user = userRecord
         promptUser = userRecord
 
