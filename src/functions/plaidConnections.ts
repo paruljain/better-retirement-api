@@ -19,6 +19,7 @@ const PLAID_BASE_URLS: Record<PlaidEnvironment, string> = {
     development: 'https://development.plaid.com',
     production: 'https://production.plaid.com'
 }
+const DEFAULT_PLAID_OAUTH_REDIRECT_URI = 'https://better-retirement.com/connections/oauth-return'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -34,6 +35,26 @@ function getPlaidClientUserId(email: string): string {
     return createHash('sha256')
         .update(`better-retirement:plaid:${email.trim().toLowerCase()}`)
         .digest('hex')
+}
+
+function getPlaidOauthRedirectUri(value: string): string {
+    const configuredRedirectUri = (process.env.PLAID_OAUTH_REDIRECT_URI || '').trim()
+
+    if (configuredRedirectUri) {
+        return configuredRedirectUri
+    }
+
+    try {
+        const url = new URL(value)
+
+        if (url.protocol === 'https:') {
+            return value
+        }
+    } catch {
+        return DEFAULT_PLAID_OAUTH_REDIRECT_URI
+    }
+
+    return DEFAULT_PLAID_OAUTH_REDIRECT_URI
 }
 
 function getRequiredAuthEmail(request: HttpRequest, context: InvocationContext): string | HttpResponseInit {
@@ -307,9 +328,7 @@ export async function createPlaidLinkToken(request: HttpRequest, context: Invoca
             }
         }
 
-        if (redirectUri) {
-            payload.redirect_uri = redirectUri
-        }
+        payload.redirect_uri = getPlaidOauthRedirectUri(redirectUri)
 
         const plaidResponse = await callPlaid(credentials, '/link/token/create', payload)
         return jsonResponse(request, 200, {
