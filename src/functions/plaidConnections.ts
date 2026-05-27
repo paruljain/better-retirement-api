@@ -322,7 +322,7 @@ export async function createPlaidLinkToken(request: HttpRequest, context: Invoca
             client_name: 'Better Retirement',
             country_codes: ['US'],
             language: 'en',
-            products: ['auth'],
+            products: ['transactions'],
             user: {
                 client_user_id: getPlaidClientUserId(authEmail)
             }
