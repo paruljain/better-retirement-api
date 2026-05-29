@@ -3,7 +3,7 @@ import { createHash } from 'crypto'
 import { getEmailFromToken, getJwtSecret } from '../lib/auth'
 import { decryptSecret, encryptSecret, hasAppEncryptionKey } from '../lib/encryption'
 import { isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
-import { getUserPlaidConnectionsCollection, PlaidAccountSnapshot, PlaidConnectionItem, UserPlaidConnectionDocument } from '../lib/mongo'
+import { getUserPlaidConnectionsCollection, getUsersCollection, PlaidAccountSnapshot, PlaidConnectionItem, PlaidHoldingSnapshot, PlaidSecuritySnapshot, UserDocument, UserPlaidConnectionDocument } from '../lib/mongo'
 
 type PlaidEnvironment = 'sandbox' | 'development' | 'production'
 
@@ -11,6 +11,15 @@ type PlaidCredentials = {
     clientId: string
     secret: string
     environment: PlaidEnvironment
+}
+
+type LinkApplyResult = {
+    status: 'updated' | 'skipped'
+    message?: string
+    targetAccountId?: string
+    targetAccountName?: string
+    oldValue?: number
+    newValue?: number
 }
 
 const PLAID_ENVIRONMENTS: PlaidEnvironment[] = ['sandbox', 'development', 'production']
@@ -176,16 +185,108 @@ function mapPlaidAccount(account: any): PlaidAccountSnapshot {
     }
 }
 
+function mapPlaidHolding(holding: any): PlaidHoldingSnapshot {
+    return {
+        accountId: String(holding?.account_id || ''),
+        securityId: String(holding?.security_id || ''),
+        quantity: typeof holding?.quantity === 'number' ? holding.quantity : null,
+        costBasis: typeof holding?.cost_basis === 'number' ? holding.cost_basis : null,
+        institutionPrice: typeof holding?.institution_price === 'number' ? holding.institution_price : null,
+        institutionPriceAsOf: typeof holding?.institution_price_as_of === 'string' ? holding.institution_price_as_of : null,
+        institutionPriceDatetime: typeof holding?.institution_price_datetime === 'string' ? holding.institution_price_datetime : null,
+        institutionValue: typeof holding?.institution_value === 'number' ? holding.institution_value : null,
+        isoCurrencyCode: typeof holding?.iso_currency_code === 'string' ? holding.iso_currency_code : null,
+        unofficialCurrencyCode: typeof holding?.unofficial_currency_code === 'string' ? holding.unofficial_currency_code : null
+    }
+}
+
+function mapPlaidSecurity(security: any): PlaidSecuritySnapshot {
+    return {
+        securityId: String(security?.security_id || ''),
+        name: typeof security?.name === 'string' ? security.name : null,
+        tickerSymbol: typeof security?.ticker_symbol === 'string' ? security.ticker_symbol : null,
+        type: typeof security?.type === 'string' ? security.type : null,
+        closePrice: typeof security?.close_price === 'number' ? security.close_price : null,
+        closePriceAsOf: typeof security?.close_price_as_of === 'string' ? security.close_price_as_of : null,
+        updateDatetime: typeof security?.update_datetime === 'string' ? security.update_datetime : null,
+        isoCurrencyCode: typeof security?.iso_currency_code === 'string' ? security.iso_currency_code : null,
+        unofficialCurrencyCode: typeof security?.unofficial_currency_code === 'string' ? security.unofficial_currency_code : null
+    }
+}
+
+async function getPlaidAccountSnapshots(credentials: PlaidCredentials, accessToken: string): Promise<PlaidAccountSnapshot[]> {
+    const accountsResponse = await callPlaid(credentials, '/accounts/get', {
+        access_token: accessToken
+    })
+
+    return Array.isArray(accountsResponse.accounts)
+        ? accountsResponse.accounts.map(mapPlaidAccount).filter((account: PlaidAccountSnapshot) => account.accountId)
+        : []
+}
+
+async function getPlaidInvestmentSnapshots(
+    credentials: PlaidCredentials,
+    accessToken: string,
+    refreshInvestments = false
+): Promise<{
+    holdings: PlaidHoldingSnapshot[]
+    securities: PlaidSecuritySnapshot[]
+    error: string
+    refreshError: string
+}> {
+    let refreshError = ''
+
+    if (refreshInvestments) {
+        try {
+            await callPlaid(credentials, '/investments/refresh', {
+                access_token: accessToken
+            })
+        } catch (error) {
+            refreshError = error instanceof Error ? error.message : 'Failed to request investment refresh.'
+        }
+    }
+
+    try {
+        const holdingsResponse = await callPlaid(credentials, '/investments/holdings/get', {
+            access_token: accessToken
+        })
+
+        return {
+            holdings: Array.isArray(holdingsResponse.holdings)
+                ? holdingsResponse.holdings.map(mapPlaidHolding).filter((holding: PlaidHoldingSnapshot) => holding.accountId && holding.securityId)
+                : [],
+            securities: Array.isArray(holdingsResponse.securities)
+                ? holdingsResponse.securities.map(mapPlaidSecurity).filter((security: PlaidSecuritySnapshot) => security.securityId)
+                : [],
+            error: '',
+            refreshError
+        }
+    } catch (error) {
+        return {
+            holdings: [],
+            securities: [],
+            error: error instanceof Error ? error.message : 'Failed to load investment holdings.',
+            refreshError
+        }
+    }
+}
+
 function getPublicItem(item: PlaidConnectionItem) {
     return {
         itemId: item.itemId,
         institutionId: item.institutionId || '',
         institutionName: item.institutionName || 'Financial institution',
         accounts: Array.isArray(item.accounts) ? item.accounts : [],
+        holdings: Array.isArray(item.holdings) ? item.holdings : [],
+        securities: Array.isArray(item.securities) ? item.securities : [],
         createdAt: item.createdAt,
         updatedAt: item.updatedAt,
         lastSyncedAt: item.lastSyncedAt || '',
-        lastError: item.lastError || ''
+        lastError: item.lastError || '',
+        holdingsLastSyncedAt: item.holdingsLastSyncedAt || '',
+        holdingsError: item.holdingsError || '',
+        holdingsRefreshRequestedAt: item.holdingsRefreshRequestedAt || '',
+        holdingsRefreshError: item.holdingsRefreshError || ''
     }
 }
 
@@ -196,6 +297,129 @@ function getPublicConnections(record: UserPlaidConnectionDocument | null) {
         environment,
         updatedAt: record?.updatedAt || '',
         items: (Array.isArray(record?.items) ? record.items : []).map(getPublicItem)
+    }
+}
+
+function getAccountLinkValue(account: PlaidAccountSnapshot | undefined): number | null {
+    const value = account?.balances?.current
+    return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function getPositionLinkValue(holding: PlaidHoldingSnapshot | undefined): number | null {
+    const value = holding?.institutionValue
+    return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function getAccountTargetField(account: any): 'amount' | 'currentValue' {
+    return account?.type === 'investment-account' ? 'currentValue' : 'amount'
+}
+
+function getLinkedSourceValue(account: any, item: PlaidConnectionItem): number | null {
+    const link = account?.plaidLink
+
+    if (!isPlainObject(link) || link.itemId !== item.itemId || typeof link.accountId !== 'string') {
+        return null
+    }
+
+    if (link.sourceType === 'account' && link.sourceField === 'currentBalance') {
+        return getAccountLinkValue(item.accounts.find((sourceAccount) => sourceAccount.accountId === link.accountId))
+    }
+
+    if (link.sourceType === 'position' && link.sourceField === 'institutionValue' && typeof link.securityId === 'string') {
+        return getPositionLinkValue((item.holdings || []).find((holding) => {
+            return holding.accountId === link.accountId && holding.securityId === link.securityId
+        }))
+    }
+
+    return null
+}
+
+function applyAccountLinksToUserDocument(user: UserDocument | null, item: PlaidConnectionItem): {
+    user: UserDocument | null
+    results: LinkApplyResult[]
+    changed: boolean
+} {
+    if (!user || !Array.isArray(user.plans)) {
+        return {
+            user,
+            results: [{
+                status: 'skipped',
+                message: 'Saved plan document was not found.'
+            }],
+            changed: false
+        }
+    }
+
+    let changed = false
+    const results: LinkApplyResult[] = []
+    const nextPlans = user.plans.map((plan: any) => {
+        const accounts = Array.isArray(plan.accounts) ? [...plan.accounts] : []
+        if (accounts.length === 0) {
+            return plan
+        }
+
+        let planChanged = false
+
+        accounts.forEach((account: any, targetIndex: number) => {
+            if (!isPlainObject(account?.plaidLink) || account.plaidLink.itemId !== item.itemId) {
+                return
+            }
+
+            const newValue = getLinkedSourceValue(account, item)
+            if (newValue === null) {
+                results.push({
+                    status: 'skipped',
+                    targetAccountId: account.id,
+                    targetAccountName: account.name || '',
+                    message: 'Plaid source value was not available.'
+                })
+                return
+            }
+
+            const targetField = getAccountTargetField(account)
+            const oldValue = typeof account[targetField] === 'number' && Number.isFinite(account[targetField])
+                ? account[targetField]
+                : 0
+
+            accounts[targetIndex] = {
+                ...account,
+                [targetField]: newValue
+            }
+            changed = true
+            planChanged = true
+            results.push({
+                status: 'updated',
+                targetAccountId: account.id,
+                targetAccountName: account?.name || '',
+                oldValue,
+                newValue
+            })
+        })
+
+        return planChanged
+            ? {
+                ...plan,
+                accounts
+            }
+            : plan
+    })
+
+    if (!changed) {
+        return {
+            user,
+            results,
+            changed
+        }
+    }
+
+    return {
+        user: {
+            ...user,
+            plans: nextPlans,
+            updatedAt: new Date().toISOString()
+        },
+        results,
+        changed
     }
 }
 
@@ -323,6 +547,7 @@ export async function createPlaidLinkToken(request: HttpRequest, context: Invoca
             country_codes: ['US'],
             language: 'en',
             products: ['transactions'],
+            optional_products: ['investments'],
             user: {
                 client_user_id: getPlaidClientUserId(authEmail)
             }
@@ -390,9 +615,8 @@ export async function exchangePlaidPublicToken(request: HttpRequest, context: In
             return jsonResponse(request, 502, { error: 'Plaid did not return an access token.' })
         }
 
-        const accountsResponse = await callPlaid(credentials, '/accounts/get', {
-            access_token: accessToken
-        })
+        const accounts = await getPlaidAccountSnapshots(credentials, accessToken)
+        const investments = await getPlaidInvestmentSnapshots(credentials, accessToken)
         const encryptedAccessToken = encryptSecret(accessToken, `userPlaidConnections:${authEmail}:items:${itemId}:accessToken`)
         const now = new Date().toISOString()
         const existingItems = Array.isArray(record?.items) ? record.items : []
@@ -404,13 +628,16 @@ export async function exchangePlaidPublicToken(request: HttpRequest, context: In
             accessTokenIv: encryptedAccessToken.iv,
             accessTokenTag: encryptedAccessToken.tag,
             accessTokenKeyVersion: encryptedAccessToken.keyVersion,
-            accounts: Array.isArray(accountsResponse.accounts)
-                ? accountsResponse.accounts.map(mapPlaidAccount).filter((account: PlaidAccountSnapshot) => account.accountId)
-                : [],
+            accounts,
+            holdings: investments.holdings,
+            securities: investments.securities,
             createdAt: existingItems.find((item) => item.itemId === itemId)?.createdAt || now,
             updatedAt: now,
             lastSyncedAt: now,
-            lastError: ''
+            lastError: '',
+            holdingsLastSyncedAt: investments.error ? '' : now,
+            holdingsError: investments.error,
+            holdingsRefreshError: investments.refreshError
         }
         const nextItems = [
             ...existingItems.filter((item) => item.itemId !== itemId),
@@ -427,8 +654,36 @@ export async function exchangePlaidPublicToken(request: HttpRequest, context: In
             }
         )
 
+        const refreshedItem = nextItems.find((candidate) => candidate.itemId === itemId)
+        let applyResults: LinkApplyResult[] = []
+        let updatedUser: UserDocument | null = null
+
+        if (refreshedItem) {
+            const users = await getUsersCollection()
+            const user = await users.findOne({ _id: authEmail })
+            const applied = applyAccountLinksToUserDocument(user, refreshedItem)
+            applyResults = applied.results
+            updatedUser = applied.user
+
+            if (applied.changed && applied.user) {
+                await users.updateOne(
+                    { _id: authEmail },
+                    {
+                        $set: {
+                            plans: applied.user.plans,
+                            updatedAt: applied.user.updatedAt
+                        }
+                    }
+                )
+            }
+        }
+
         const updatedRecord = await collection.findOne({ _id: authEmail })
-        return jsonResponse(request, 200, getPublicConnections(updatedRecord))
+        return jsonResponse(request, 200, {
+            ...getPublicConnections(updatedRecord),
+            applyResults,
+            user: updatedUser || undefined
+        })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to connect Plaid institution.'
         context.error(`Failed to exchange Plaid public token: ${message}`)
@@ -463,9 +718,8 @@ export async function refreshPlaidConnection(request: HttpRequest, context: Invo
         }
 
         const accessToken = decryptAccessToken(item, authEmail)
-        const accountsResponse = await callPlaid(credentials, '/accounts/get', {
-            access_token: accessToken
-        })
+        const accounts = await getPlaidAccountSnapshots(credentials, accessToken)
+        const investments = await getPlaidInvestmentSnapshots(credentials, accessToken, true)
         const now = new Date().toISOString()
         const nextItems = items.map((candidate) => {
             if (candidate.itemId !== itemId) {
@@ -474,12 +728,16 @@ export async function refreshPlaidConnection(request: HttpRequest, context: Invo
 
             return {
                 ...candidate,
-                accounts: Array.isArray(accountsResponse.accounts)
-                    ? accountsResponse.accounts.map(mapPlaidAccount).filter((account: PlaidAccountSnapshot) => account.accountId)
-                    : [],
+                accounts,
+                holdings: investments.holdings,
+                securities: investments.securities,
                 updatedAt: now,
                 lastSyncedAt: now,
-                lastError: ''
+                lastError: '',
+                holdingsLastSyncedAt: investments.error ? candidate.holdingsLastSyncedAt : now,
+                holdingsError: investments.error,
+                holdingsRefreshRequestedAt: now,
+                holdingsRefreshError: investments.refreshError
             }
         })
 
@@ -493,8 +751,36 @@ export async function refreshPlaidConnection(request: HttpRequest, context: Invo
             }
         )
 
+        const refreshedItem = nextItems.find((candidate) => candidate.itemId === itemId)
+        let applyResults: LinkApplyResult[] = []
+        let updatedUser: UserDocument | null = null
+
+        if (refreshedItem) {
+            const users = await getUsersCollection()
+            const user = await users.findOne({ _id: authEmail })
+            const applied = applyAccountLinksToUserDocument(user, refreshedItem)
+            applyResults = applied.results
+            updatedUser = applied.user
+
+            if (applied.changed && applied.user) {
+                await users.updateOne(
+                    { _id: authEmail },
+                    {
+                        $set: {
+                            plans: applied.user.plans,
+                            updatedAt: applied.user.updatedAt
+                        }
+                    }
+                )
+            }
+        }
+
         const updatedRecord = await collection.findOne({ _id: authEmail })
-        return jsonResponse(request, 200, getPublicConnections(updatedRecord))
+        return jsonResponse(request, 200, {
+            ...getPublicConnections(updatedRecord),
+            applyResults,
+            user: updatedUser || undefined
+        })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to refresh Plaid balances.'
         context.error(`Failed to refresh Plaid connection: ${message}`)

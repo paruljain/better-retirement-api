@@ -40,6 +40,31 @@ export type PlaidAccountSnapshot = {
     }
 }
 
+export type PlaidHoldingSnapshot = {
+    accountId: string
+    securityId: string
+    quantity?: number | null
+    costBasis?: number | null
+    institutionPrice?: number | null
+    institutionPriceAsOf?: string | null
+    institutionPriceDatetime?: string | null
+    institutionValue?: number | null
+    isoCurrencyCode?: string | null
+    unofficialCurrencyCode?: string | null
+}
+
+export type PlaidSecuritySnapshot = {
+    securityId: string
+    name?: string | null
+    tickerSymbol?: string | null
+    type?: string | null
+    closePrice?: number | null
+    closePriceAsOf?: string | null
+    updateDatetime?: string | null
+    isoCurrencyCode?: string | null
+    unofficialCurrencyCode?: string | null
+}
+
 export type PlaidConnectionItem = {
     itemId: string
     institutionId?: string
@@ -49,10 +74,16 @@ export type PlaidConnectionItem = {
     accessTokenTag: string
     accessTokenKeyVersion: string
     accounts: PlaidAccountSnapshot[]
+    holdings?: PlaidHoldingSnapshot[]
+    securities?: PlaidSecuritySnapshot[]
     createdAt: string
     updatedAt: string
     lastSyncedAt?: string
     lastError?: string
+    holdingsLastSyncedAt?: string
+    holdingsError?: string
+    holdingsRefreshRequestedAt?: string
+    holdingsRefreshError?: string
 }
 
 export type UserPlaidConnectionDocument = Document & {
