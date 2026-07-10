@@ -1,6 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { createHash } from 'crypto'
-import { getEmailFromToken, getJwtSecret } from '../lib/auth'
+import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret } from '../lib/auth'
 import { decryptSecret, encryptSecret, hasAppEncryptionKey } from '../lib/encryption'
 import { isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
 import { getUserPlaidConnectionsCollection, getUsersCollection, PlaidAccountSnapshot, PlaidConnectionItem, PlaidHoldingSnapshot, PlaidSecuritySnapshot, UserDocument, UserPlaidConnectionDocument } from '../lib/mongo'
@@ -75,8 +75,7 @@ function getRequiredAuthEmail(request: HttpRequest, context: InvocationContext):
     try {
         return getEmailFromToken(request)
     } catch (error) {
-        const message = error instanceof Error ? error.message : 'Invalid token.'
-        return jsonResponse(request, 401, { error: message })
+        return jsonResponse(request, 401, getAuthenticationErrorPayload(error))
     }
 }
 

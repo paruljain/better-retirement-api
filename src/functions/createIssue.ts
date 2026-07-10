@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { getEmailFromToken, getJwtSecret, getNameFromToken } from '../lib/auth'
+import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret, getNameFromToken } from '../lib/auth'
 import { isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
 
 const DEFAULT_GITHUB_OWNER = 'paruljain'
@@ -324,8 +324,7 @@ export async function createIssue(request: HttpRequest, context: InvocationConte
         userEmail = getEmailFromToken(request)
         userName = getNameFromToken(request)
     } catch (error) {
-        const message = error instanceof Error ? error.message : 'Invalid token.'
-        return jsonResponse(request, 401, { error: message })
+        return jsonResponse(request, 401, getAuthenticationErrorPayload(error))
     }
 
     let body: IssueRequestBody

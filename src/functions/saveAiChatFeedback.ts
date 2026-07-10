@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { getEmailFromToken, getJwtSecret, getNameFromToken } from '../lib/auth'
+import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret, getNameFromToken } from '../lib/auth'
 import { isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
 import { getAiChatFeedbackCollection } from '../lib/mongo'
 
@@ -76,8 +76,7 @@ export async function saveAiChatFeedback(request: HttpRequest, context: Invocati
         email = getEmailFromToken(request)
         name = getNameFromToken(request)
     } catch (error) {
-        const message = error instanceof Error ? error.message : 'Invalid token.'
-        return jsonResponse(request, 401, { error: message })
+        return jsonResponse(request, 401, getAuthenticationErrorPayload(error))
     }
 
     let body: unknown

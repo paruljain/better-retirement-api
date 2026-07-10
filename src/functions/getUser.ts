@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { getEmailFromToken, getJwtSecret } from '../lib/auth'
+import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret } from '../lib/auth'
 import { jsonResponse, optionsResponse, isOptionsRequest } from '../lib/http'
 import { getUserActivityDailyCollection, getUsersCollection } from '../lib/mongo'
 
@@ -26,8 +26,7 @@ export async function getUser(request: HttpRequest, context: InvocationContext):
     try {
         email = getEmailFromToken(request)
     } catch (error) {
-        const message = error instanceof Error ? error.message : 'Invalid token.'
-        return jsonResponse(request, 401, { error: message })
+        return jsonResponse(request, 401, getAuthenticationErrorPayload(error))
     }
 
     try {

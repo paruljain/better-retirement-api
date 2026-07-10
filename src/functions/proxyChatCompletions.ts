@@ -1,7 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { ReadableStream } from 'stream/web'
 import OpenAI from 'openai'
-import { getEmailFromToken, getJwtSecret, getNameFromToken } from '../lib/auth'
+import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret, getNameFromToken } from '../lib/auth'
 import { decryptSecret } from '../lib/encryption'
 import { corsHeaders, isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
 import { buildActivePlanPromptDigest } from '../lib/aiChatPromptDigest'
@@ -463,8 +463,7 @@ export async function proxyChatCompletions(request: HttpRequest, context: Invoca
         email = getEmailFromToken(request)
         userName = getNameFromToken(request)
     } catch (error) {
-        const message = error instanceof Error ? error.message : 'Invalid token.'
-        return jsonResponse(request, 401, { error: message })
+        return jsonResponse(request, 401, getAuthenticationErrorPayload(error))
     }
 
     let body: unknown

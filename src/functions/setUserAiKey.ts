@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { getEmailFromToken, getJwtSecret } from '../lib/auth'
+import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret } from '../lib/auth'
 import { encryptSecret, hasAppEncryptionKey } from '../lib/encryption'
 import { isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
 import { getUserAiCredentialsCollection } from '../lib/mongo'
@@ -32,8 +32,7 @@ export async function setUserAiKey(request: HttpRequest, context: InvocationCont
     try {
         email = getEmailFromToken(request)
     } catch (error) {
-        const message = error instanceof Error ? error.message : 'Invalid token.'
-        return jsonResponse(request, 401, { error: message })
+        return jsonResponse(request, 401, getAuthenticationErrorPayload(error))
     }
 
     let body: unknown
