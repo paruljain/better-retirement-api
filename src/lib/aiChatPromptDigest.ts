@@ -130,6 +130,17 @@ function getAccountRows(accounts: any[]): CsvRow[] {
     ])
 }
 
+function getDefaultCashAccountName(accountFlow: any, accounts: any[]): string {
+    const destinationId = accountFlow?.incomeDestinationAccountId
+    const destination = (accounts || []).find((account) => (
+        account?.id === destinationId
+        && account?.type === 'interest-account'
+        && account?.taxStatus === 'regular'
+    ))
+
+    return destination?.name || ''
+}
+
 function getFundableAccounts(accounts: any[]): any[] {
     return (accounts || []).filter((account) => (
         (account?.type === 'interest-account' || account?.type === 'investment-account')
@@ -414,6 +425,7 @@ export function buildActivePlanPromptDigest(user: UserDocument, activePlanId = '
     const summaryLines = [
         `Plan Name: ${plan.planName || 'Untitled Plan'}`,
         `Current Net Worth: ${formatCurrency(getCurrentNetWorth(plan))}`,
+        `Default Cash Account: ${getDefaultCashAccountName(plan.accountFlow, accounts) || 'Not configured'}`,
         ...getHouseholdLines(plan.basicInfo),
         `Rates - COLA: ${formatPercent(plan.rates?.cola)}, Inflation: ${formatPercent(plan.rates?.inflation)}, Wage Growth: ${formatPercent(plan.rates?.wageGrowth)}`,
         `Counts - Accounts: ${accounts.length}, Incomes: ${incomes.length}, Expenses: ${expenses.length}, Transfers: ${transfers.length}, Homes: ${homes.length}, Debts: ${debts.length}, Healthcare Entries: ${medicalEntries.length}, Roth Conversions: ${rothEntries.length}`
@@ -423,7 +435,7 @@ export function buildActivePlanPromptDigest(user: UserDocument, activePlanId = '
         summaryLines.join('\n'),
         buildCsvBlock(
             'Accounts',
-            ['name', 'type', 'taxStatus', 'owner', 'balance', 'basis', 'growthOrApy', 'dividendRate'],
+            ['name', 'type', 'taxStatus', 'owner', 'balance', 'basis', 'priceGrowthOrApy', 'retirementDistributionYieldOrBrokerageDividendYield'],
             getAccountRows(accounts)
         ),
         buildCsvBlock(
