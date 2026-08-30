@@ -10,9 +10,11 @@
     "start": "func start",
     "backup:user-ai-credentials": "node tools/backup-user-ai-credentials.js",
     "migrate:user-ai-credentials": "node tools/migrate-user-ai-credentials.js",
-    "test": "echo \"No tests yet...\""
+    "email:announcement": "npm run build --silent && node tools/send-product-update.js",
+    "test": "npm run build --silent && node --test tests/*.test.js"
   },
   "dependencies": {
+    "@azure/communication-email": "^1.1.0",
     "@azure/functions": "^4.0.0",
     "@types/jsonwebtoken": "^9.0.10",
     "google-auth-library": "^10.6.1",

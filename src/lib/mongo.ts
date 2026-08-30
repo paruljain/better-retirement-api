@@ -24,6 +24,49 @@ export type UserAiCredentialDocument = Document & {
     updatedAt: string
 }
 
+export type EmailPreferenceDocument = Document & {
+    _id: string
+    email: string
+    productUpdatesSubscribed: boolean
+    emailDeliverable: boolean
+    source: 'existing-account' | 'account-preferences' | 'email-unsubscribe' | 'delivery-event'
+    subscribedAt?: string
+    unsubscribedAt?: string
+    updatedAt: string
+    deliveryStatus?: string
+    lastDeliveryEventAt?: string
+    lastBounceAt?: string
+}
+
+export type EmailCampaignDocument = Document & {
+    _id: string
+    subject: string
+    contentHash: string
+    markdown: string
+    status: 'draft' | 'testing' | 'sending' | 'completed' | 'completed-with-errors'
+    audienceCount: number
+    sentCount: number
+    failedCount: number
+    skippedCount: number
+    createdAt: string
+    updatedAt: string
+    startedAt?: string
+    completedAt?: string
+}
+
+export type EmailDeliveryDocument = Document & {
+    _id: string
+    campaignId: string
+    recipient: string
+    kind: 'test' | 'campaign'
+    status: string
+    attemptCount: number
+    messageId?: string
+    error?: string
+    createdAt: string
+    updatedAt: string
+}
+
 export type PlaidAccountSnapshot = {
     accountId: string
     name: string
@@ -180,6 +223,21 @@ export async function getUserActivityDailyCollection(): Promise<Collection<UserA
 export async function getUserAiCredentialsCollection(): Promise<Collection<UserAiCredentialDocument>> {
     const database = await getDatabase()
     return database.collection<UserAiCredentialDocument>('userAiCredentials')
+}
+
+export async function getEmailPreferencesCollection(): Promise<Collection<EmailPreferenceDocument>> {
+    const database = await getDatabase()
+    return database.collection<EmailPreferenceDocument>('emailPreferences')
+}
+
+export async function getEmailCampaignsCollection(): Promise<Collection<EmailCampaignDocument>> {
+    const database = await getDatabase()
+    return database.collection<EmailCampaignDocument>('emailCampaigns')
+}
+
+export async function getEmailDeliveriesCollection(): Promise<Collection<EmailDeliveryDocument>> {
+    const database = await getDatabase()
+    return database.collection<EmailDeliveryDocument>('emailDeliveries')
 }
 
 export async function getUserPlaidConnectionsCollection(): Promise<Collection<UserPlaidConnectionDocument>> {
