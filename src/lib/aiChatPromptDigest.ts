@@ -346,6 +346,70 @@ function formatSpendingCapacitySection(computedContext: unknown): string {
     ].join('\n')
 }
 
+function formatSocialSecurityTimingResult(
+    title: string,
+    value: unknown,
+    outcomeLabel = '',
+    outcomeKey = ''
+): string {
+    const result = isPlainObject(value) ? value : null
+
+    if (!result) {
+        return `${title}\nNo result was provided.`
+    }
+
+    return [
+        title,
+        `You Claim Age: ${formatMaybeNumber(result.primaryClaimAge) || 'N/A'}`,
+        `Spouse Claim Age: ${formatMaybeNumber(result.spouseClaimAge) || 'N/A'}`,
+        `You Monthly Benefit: ${formatCurrency(result.primaryMonthlyBenefit)}`,
+        `Spouse Monthly Benefit: ${formatCurrency(result.spouseMonthlyBenefit)}`,
+        `Household Monthly Benefit: ${formatCurrency(result.householdMonthlyBenefit)}`,
+        ...(outcomeLabel && outcomeKey
+            ? [`${outcomeLabel}: ${formatCurrency(result[outcomeKey])}`]
+            : [])
+    ].join('\n')
+}
+
+function formatSocialSecurityTimingSection(computedContext: unknown): string {
+    const timing = isPlainObject(computedContext) && isPlainObject(computedContext.socialSecurityTiming)
+        ? computedContext.socialSecurityTiming
+        : null
+
+    if (getRunStatus(timing) !== 'available' || !timing) {
+        return [
+            'Social Security Timing',
+            '----------------------',
+            'Unavailable. Add valid Social Security benefit-at-FRA amounts in Basic Info to calculate claim-age comparisons.'
+        ].join('\n')
+    }
+
+    return [
+        'Social Security Timing',
+        '----------------------',
+        "Monthly benefits are ongoing household amounts in today's dollars once both people are collecting.",
+        '',
+        formatSocialSecurityTimingResult(
+            'N — Maximum Ending Net Worth',
+            timing.maximumEndingNetWorth,
+            'Ending Net Worth',
+            'endingNetWorth'
+        ),
+        '',
+        formatSocialSecurityTimingResult(
+            'T — Minimum Lifetime Taxes',
+            timing.minimumLifetimeTaxes,
+            'Lifetime Taxes',
+            'lifetimeTaxes'
+        ),
+        '',
+        formatSocialSecurityTimingResult(
+            'Maximum Household Monthly Social Security Income',
+            timing.maximumHouseholdMonthlyIncome
+        )
+    ].join('\n')
+}
+
 function getChartYears(charts: Record<string, unknown>): number[] {
     return getArrayValue(charts.years)
         .map((year) => Number(year))
@@ -401,6 +465,8 @@ function buildComputedContextBlock(computedContext: unknown): string {
         formatMonteCarloSection(computedContext),
         '',
         formatSpendingCapacitySection(computedContext),
+        '',
+        formatSocialSecurityTimingSection(computedContext),
         '',
         formatChartsSection(computedContext)
     ].join('\n')
