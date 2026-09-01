@@ -1,6 +1,12 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret, getNameFromToken } from '../lib/auth'
 import { jsonResponse, optionsResponse, isOptionsRequest } from '../lib/http'
+import {
+    getMaintenanceConfig,
+    isSchemaVersionMismatch,
+    SCHEMA_VERSION_MISMATCH_CODE,
+    withMaintenanceGuard
+} from '../lib/maintenance'
 import { getUsersCollection } from '../lib/mongo'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -44,6 +50,16 @@ export async function saveUser(request: HttpRequest, context: InvocationContext)
     }
 
     try {
+        const maintenanceConfig = await getMaintenanceConfig()
+
+        if (isSchemaVersionMismatch(body.schemaVersion, maintenanceConfig.requiredSchemaVersion)) {
+            return jsonResponse(request, 409, {
+                code: SCHEMA_VERSION_MISMATCH_CODE,
+                message: 'Your application is out of date. Sign in again to reload the latest version of your plan.',
+                requiredSchemaVersion: maintenanceConfig.requiredSchemaVersion
+            })
+        }
+
         const users = await getUsersCollection()
         const documentToSave = {
             ...body,
@@ -75,5 +91,5 @@ app.http('save-user', {
     methods: ['POST', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'users',
-    handler: saveUser
+    handler: withMaintenanceGuard(saveUser)
 })

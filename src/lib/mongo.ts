@@ -181,6 +181,13 @@ export type AppConfigDocument = Document & {
     _id: string
     schemaVersion?: number
     plans?: Document[]
+    enabled?: boolean
+    message?: string
+    expectedEndAt?: string
+    operationId?: string
+    requiredSchemaVersion?: number
+    retryAfterSeconds?: number
+    startedAt?: string
     updatedAt?: string
 }
 

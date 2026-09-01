@@ -39,10 +39,18 @@ export function corsHeaders(request: HttpRequest): Record<string, string> {
     }
 }
 
-export function jsonResponse(request: HttpRequest, status: number, body: unknown): HttpResponseInit {
+export function jsonResponse(
+    request: HttpRequest,
+    status: number,
+    body: unknown,
+    additionalHeaders: Record<string, string> = {}
+): HttpResponseInit {
     return {
         status,
-        headers: corsHeaders(request),
+        headers: {
+            ...corsHeaders(request),
+            ...additionalHeaders
+        },
         jsonBody: body
     }
 }

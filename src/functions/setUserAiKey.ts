@@ -2,6 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret } from '../lib/auth'
 import { encryptSecret, hasAppEncryptionKey } from '../lib/encryption'
 import { isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
+import { withMaintenanceGuard } from '../lib/maintenance'
 import { getUserAiCredentialsCollection } from '../lib/mongo'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -88,5 +89,5 @@ app.http('set-user-ai-key', {
     methods: ['POST', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'users/me/ai-key',
-    handler: setUserAiKey
+    handler: withMaintenanceGuard(setUserAiKey)
 })

@@ -1,6 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret, getNameFromToken } from '../lib/auth'
 import { isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
+import { withMaintenanceGuard } from '../lib/maintenance'
 
 const DEFAULT_GITHUB_OWNER = 'paruljain'
 const DEFAULT_GITHUB_REPO = 'better-retirement-issues'
@@ -369,5 +370,5 @@ app.http('create-issue', {
     methods: ['POST', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'issues',
-    handler: createIssue
+    handler: withMaintenanceGuard(createIssue)
 })

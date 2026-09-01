@@ -1,6 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret } from '../lib/auth'
 import { jsonResponse, optionsResponse, isOptionsRequest } from '../lib/http'
+import { withMaintenanceGuard } from '../lib/maintenance'
 import { getUserActivityDailyCollection, getUsersCollection } from '../lib/mongo'
 
 function getUtcDateKey(date: Date): string {
@@ -77,5 +78,5 @@ app.http('get-user', {
     methods: ['GET', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'users/me',
-    handler: getUser
+    handler: withMaintenanceGuard(getUser)
 })

@@ -4,6 +4,7 @@ import OpenAI from 'openai'
 import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret, getNameFromToken } from '../lib/auth'
 import { decryptSecret } from '../lib/encryption'
 import { corsHeaders, isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
+import { withMaintenanceGuard } from '../lib/maintenance'
 import { buildActivePlanPromptDigest } from '../lib/aiChatPromptDigest'
 import { DEMO_PLAN_ID, getDemoUserDocument } from '../lib/demoPlan'
 import { AiChatPromptDocument, getAiChatPromptsCollection, getUserAiCredentialsCollection, getUsersCollection, UserAiCredentialDocument, UserDocument } from '../lib/mongo'
@@ -574,5 +575,5 @@ app.http('proxy-chat-completions', {
     methods: ['POST', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'chat/completions',
-    handler: proxyChatCompletions
+    handler: withMaintenanceGuard(proxyChatCompletions)
 })

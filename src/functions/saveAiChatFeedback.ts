@@ -1,6 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret, getNameFromToken } from '../lib/auth'
 import { isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
+import { withMaintenanceGuard } from '../lib/maintenance'
 import { getAiChatFeedbackCollection } from '../lib/mongo'
 
 const MAX_COMMENT_LENGTH = 2000
@@ -134,5 +135,5 @@ app.http('save-ai-chat-feedback', {
     methods: ['POST', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'ai-chat/feedback',
-    handler: saveAiChatFeedback
+    handler: withMaintenanceGuard(saveAiChatFeedback)
 })

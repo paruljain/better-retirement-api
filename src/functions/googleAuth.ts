@@ -3,6 +3,7 @@ import { OAuth2Client, TokenPayload } from 'google-auth-library'
 import jwt from 'jsonwebtoken'
 import { getJwtSecret } from '../lib/auth'
 import { jsonResponse, optionsResponse, isOptionsRequest } from '../lib/http'
+import { withMaintenanceGuard } from '../lib/maintenance'
 import { getAccessListCollection } from '../lib/mongo'
 
 const googleClient = new OAuth2Client()
@@ -128,5 +129,5 @@ app.http('google-auth-login', {
     methods: ['POST', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'auth/google/login',
-    handler: validateGoogleIdToken
+    handler: withMaintenanceGuard(validateGoogleIdToken)
 })

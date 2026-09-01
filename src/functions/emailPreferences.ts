@@ -2,6 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret } from '../lib/auth'
 import { resolveEmailPreferences, updateProductUpdatePreference } from '../lib/emailPreferences'
 import { jsonResponse, optionsResponse, isOptionsRequest } from '../lib/http'
+import { withMaintenanceGuard } from '../lib/maintenance'
 import { getEmailPreferencesCollection } from '../lib/mongo'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -73,5 +74,5 @@ app.http('email-preferences', {
     methods: ['GET', 'POST', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'users/me/email-preferences',
-    handler: emailPreferences
+    handler: withMaintenanceGuard(emailPreferences)
 })

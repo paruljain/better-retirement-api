@@ -2,6 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret } from '../lib/auth'
 import { jsonResponse, optionsResponse, isOptionsRequest } from '../lib/http'
 import { getDemoUserDocument } from '../lib/demoPlan'
+import { withMaintenanceGuard } from '../lib/maintenance'
 
 export async function getDemoPlan(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
     if (isOptionsRequest(request)) {
@@ -45,5 +46,5 @@ app.http('get-demo-plan', {
     methods: ['GET', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'app-config/demo-plan',
-    handler: getDemoPlan
+    handler: withMaintenanceGuard(getDemoPlan)
 })

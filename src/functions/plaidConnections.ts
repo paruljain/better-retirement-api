@@ -3,6 +3,7 @@ import { createHash } from 'crypto'
 import { getAuthenticationErrorPayload, getEmailFromToken, getJwtSecret } from '../lib/auth'
 import { decryptSecret, encryptSecret, hasAppEncryptionKey } from '../lib/encryption'
 import { isOptionsRequest, jsonResponse, optionsResponse } from '../lib/http'
+import { withMaintenanceGuard } from '../lib/maintenance'
 import { getUserPlaidConnectionsCollection, getUsersCollection, PlaidAccountSnapshot, PlaidConnectionItem, PlaidHoldingSnapshot, PlaidSecuritySnapshot, UserDocument, UserPlaidConnectionDocument } from '../lib/mongo'
 
 type PlaidEnvironment = 'sandbox' | 'development' | 'production'
@@ -844,40 +845,40 @@ app.http('get-plaid-connections', {
     methods: ['GET', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'plaid/connections',
-    handler: getPlaidConnections
+    handler: withMaintenanceGuard(getPlaidConnections)
 })
 
 app.http('save-plaid-credentials', {
     methods: ['POST', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'plaid/credentials',
-    handler: savePlaidCredentials
+    handler: withMaintenanceGuard(savePlaidCredentials)
 })
 
 app.http('create-plaid-link-token', {
     methods: ['POST', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'plaid/link-token',
-    handler: createPlaidLinkToken
+    handler: withMaintenanceGuard(createPlaidLinkToken)
 })
 
 app.http('exchange-plaid-public-token', {
     methods: ['POST', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'plaid/exchange-public-token',
-    handler: exchangePlaidPublicToken
+    handler: withMaintenanceGuard(exchangePlaidPublicToken)
 })
 
 app.http('refresh-plaid-connection', {
     methods: ['POST', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'plaid/connections/{itemId}/refresh',
-    handler: refreshPlaidConnection
+    handler: withMaintenanceGuard(refreshPlaidConnection)
 })
 
 app.http('delete-plaid-connection', {
     methods: ['DELETE', 'OPTIONS'],
     authLevel: 'anonymous',
     route: 'plaid/connections/{itemId}',
-    handler: deletePlaidConnection
+    handler: withMaintenanceGuard(deletePlaidConnection)
 })
