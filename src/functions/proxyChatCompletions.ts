@@ -11,7 +11,7 @@ import { AiChatPromptDocument, getAiChatPromptsCollection, getUserAiCredentialsC
 import { createGithubIssueFromReport, IssueContext, IssueValidationError } from './createIssue'
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai'
-const GEMINI_MODEL = 'gemini-3-flash-preview'
+const GEMINI_MODEL = 'gemini-3.5-flash-lite'
 const INSTRUCTIONS_PROMPT_ID = 'instructions'
 const ACTIVE_PLAN_DIGEST_SECTION_ID = 'active-plan-digest'
 const GET_PROMPT_SECTIONS_TOOL_NAME = 'get_prompt_sections'

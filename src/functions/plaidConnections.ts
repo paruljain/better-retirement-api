@@ -19,6 +19,8 @@ type LinkApplyResult = {
     message?: string
     targetAccountId?: string
     targetAccountName?: string
+    targetHoldingId?: string
+    targetHoldingName?: string
     oldValue?: number
     newValue?: number
 }
@@ -361,39 +363,97 @@ function applyAccountLinksToUserDocument(user: UserDocument | null, item: PlaidC
         let planChanged = false
 
         accounts.forEach((account: any, targetIndex: number) => {
-            if (!isPlainObject(account?.plaidLink) || account.plaidLink.itemId !== item.itemId) {
-                return
+            let nextAccount = account
+            let accountChanged = false
+
+            if (isPlainObject(account?.plaidLink) && account.plaidLink.itemId === item.itemId) {
+                const newValue = getLinkedSourceValue(account, item)
+                if (newValue === null) {
+                    results.push({
+                        status: 'skipped',
+                        targetAccountId: account.id,
+                        targetAccountName: account.name || '',
+                        message: 'Plaid source value was not available.'
+                    })
+                } else {
+                    const targetField = getAccountTargetField(account)
+                    const oldValue = typeof account[targetField] === 'number' && Number.isFinite(account[targetField])
+                        ? account[targetField]
+                        : 0
+                    nextAccount = {
+                        ...account,
+                        [targetField]: newValue
+                    }
+                    accountChanged = true
+                    results.push({
+                        status: 'updated',
+                        targetAccountId: account.id,
+                        targetAccountName: account?.name || '',
+                        oldValue,
+                        newValue
+                    })
+                }
             }
 
-            const newValue = getLinkedSourceValue(account, item)
-            if (newValue === null) {
+            const holdings = Array.isArray(account?.holdings) ? account.holdings : []
+            let holdingChanged = false
+            const nextHoldings = holdings.map((holding: any) => {
+                if (!isPlainObject(holding?.plaidLink) || holding.plaidLink.itemId !== item.itemId) {
+                    return holding
+                }
+
+                const newValue = getLinkedSourceValue(holding, item)
+                if (newValue === null) {
+                    results.push({
+                        status: 'skipped',
+                        targetAccountId: account.id,
+                        targetAccountName: account.name || '',
+                        targetHoldingId: holding.id,
+                        targetHoldingName: holding.name || '',
+                        message: 'Plaid source value was not available.'
+                    })
+                    return holding
+                }
+
+                const oldValue = typeof holding.currentValue === 'number' && Number.isFinite(holding.currentValue)
+                    ? holding.currentValue
+                    : 0
+                holdingChanged = true
                 results.push({
-                    status: 'skipped',
+                    status: 'updated',
                     targetAccountId: account.id,
                     targetAccountName: account.name || '',
-                    message: 'Plaid source value was not available.'
+                    targetHoldingId: holding.id,
+                    targetHoldingName: holding.name || '',
+                    oldValue,
+                    newValue
                 })
-                return
-            }
-
-            const targetField = getAccountTargetField(account)
-            const oldValue = typeof account[targetField] === 'number' && Number.isFinite(account[targetField])
-                ? account[targetField]
-                : 0
-
-            accounts[targetIndex] = {
-                ...account,
-                [targetField]: newValue
-            }
-            changed = true
-            planChanged = true
-            results.push({
-                status: 'updated',
-                targetAccountId: account.id,
-                targetAccountName: account?.name || '',
-                oldValue,
-                newValue
+                return {
+                    ...holding,
+                    currentValue: newValue
+                }
             })
+
+            if (holdingChanged) {
+                const targetField = getAccountTargetField(account)
+                const totalValue = nextHoldings.reduce((total: number, holding: any) => {
+                    return total + (typeof holding.currentValue === 'number' && Number.isFinite(holding.currentValue)
+                        ? holding.currentValue
+                        : 0)
+                }, 0)
+                nextAccount = {
+                    ...nextAccount,
+                    holdings: nextHoldings,
+                    [targetField]: totalValue
+                }
+                accountChanged = true
+            }
+
+            if (accountChanged) {
+                accounts[targetIndex] = nextAccount
+                changed = true
+                planChanged = true
+            }
         })
 
         return planChanged
