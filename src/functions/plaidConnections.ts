@@ -25,6 +25,13 @@ type LinkApplyResult = {
     newValue?: number
 }
 
+type PlaidInvestmentSnapshots = {
+    holdings: PlaidHoldingSnapshot[]
+    securities: PlaidSecuritySnapshot[]
+    error: string
+    refreshError: string
+}
+
 const PLAID_ENVIRONMENTS: PlaidEnvironment[] = ['sandbox', 'development', 'production']
 const PLAID_BASE_URLS: Record<PlaidEnvironment, string> = {
     sandbox: 'https://sandbox.plaid.com',
@@ -230,12 +237,7 @@ async function getPlaidInvestmentSnapshots(
     credentials: PlaidCredentials,
     accessToken: string,
     refreshInvestments = false
-): Promise<{
-    holdings: PlaidHoldingSnapshot[]
-    securities: PlaidSecuritySnapshot[]
-    error: string
-    refreshError: string
-}> {
+): Promise<PlaidInvestmentSnapshots> {
     let refreshError = ''
 
     if (refreshInvestments) {
@@ -270,6 +272,34 @@ async function getPlaidInvestmentSnapshots(
             error: error instanceof Error ? error.message : 'Failed to load investment holdings.',
             refreshError
         }
+    }
+}
+
+export function buildInvestmentSnapshotUpdate(
+    existingItem: PlaidConnectionItem | undefined,
+    investments: PlaidInvestmentSnapshots,
+    syncedAt: string,
+    refreshRequested = false
+) {
+    const fetchedHoldings = !investments.error
+
+    return {
+        holdings: fetchedHoldings
+            ? investments.holdings
+            : Array.isArray(existingItem?.holdings) ? existingItem.holdings : [],
+        securities: fetchedHoldings
+            ? investments.securities
+            : Array.isArray(existingItem?.securities) ? existingItem.securities : [],
+        holdingsLastSyncedAt: fetchedHoldings
+            ? syncedAt
+            : existingItem?.holdingsLastSyncedAt || '',
+        holdingsError: investments.error,
+        ...(refreshRequested
+            ? { holdingsRefreshRequestedAt: syncedAt }
+            : existingItem?.holdingsRefreshRequestedAt
+                ? { holdingsRefreshRequestedAt: existingItem.holdingsRefreshRequestedAt }
+                : {}),
+        holdingsRefreshError: investments.refreshError
     }
 }
 
@@ -327,7 +357,12 @@ function getLinkedSourceValue(account: any, item: PlaidConnectionItem): number |
         return getAccountLinkValue(item.accounts.find((sourceAccount) => sourceAccount.accountId === link.accountId))
     }
 
-    if (link.sourceType === 'position' && link.sourceField === 'institutionValue' && typeof link.securityId === 'string') {
+    if (
+        link.sourceType === 'position'
+        && link.sourceField === 'institutionValue'
+        && typeof link.securityId === 'string'
+        && !item.holdingsError
+    ) {
         return getPositionLinkValue((item.holdings || []).find((holding) => {
             return holding.accountId === link.accountId && holding.securityId === link.securityId
         }))
@@ -336,7 +371,15 @@ function getLinkedSourceValue(account: any, item: PlaidConnectionItem): number |
     return null
 }
 
-function applyAccountLinksToUserDocument(user: UserDocument | null, item: PlaidConnectionItem): {
+function getUnavailableSourceMessage(target: any, item: PlaidConnectionItem): string {
+    if (target?.plaidLink?.sourceType === 'position' && item.holdingsError) {
+        return 'Plaid investment positions could not be refreshed. The last successful snapshot was retained.'
+    }
+
+    return 'Plaid source value was not available.'
+}
+
+export function applyAccountLinksToUserDocument(user: UserDocument | null, item: PlaidConnectionItem): {
     user: UserDocument | null
     results: LinkApplyResult[]
     changed: boolean
@@ -373,7 +416,7 @@ function applyAccountLinksToUserDocument(user: UserDocument | null, item: PlaidC
                         status: 'skipped',
                         targetAccountId: account.id,
                         targetAccountName: account.name || '',
-                        message: 'Plaid source value was not available.'
+                        message: getUnavailableSourceMessage(account, item)
                     })
                 } else {
                     const targetField = getAccountTargetField(account)
@@ -410,7 +453,7 @@ function applyAccountLinksToUserDocument(user: UserDocument | null, item: PlaidC
                         targetAccountName: account.name || '',
                         targetHoldingId: holding.id,
                         targetHoldingName: holding.name || '',
-                        message: 'Plaid source value was not available.'
+                        message: getUnavailableSourceMessage(holding, item)
                     })
                     return holding
                 }
@@ -680,6 +723,7 @@ export async function exchangePlaidPublicToken(request: HttpRequest, context: In
         const encryptedAccessToken = encryptSecret(accessToken, `userPlaidConnections:${authEmail}:items:${itemId}:accessToken`)
         const now = new Date().toISOString()
         const existingItems = Array.isArray(record?.items) ? record.items : []
+        const existingItem = existingItems.find((item) => item.itemId === itemId)
         const nextItem: PlaidConnectionItem = {
             itemId,
             institutionId,
@@ -689,15 +733,11 @@ export async function exchangePlaidPublicToken(request: HttpRequest, context: In
             accessTokenTag: encryptedAccessToken.tag,
             accessTokenKeyVersion: encryptedAccessToken.keyVersion,
             accounts,
-            holdings: investments.holdings,
-            securities: investments.securities,
-            createdAt: existingItems.find((item) => item.itemId === itemId)?.createdAt || now,
+            ...buildInvestmentSnapshotUpdate(existingItem, investments, now),
+            createdAt: existingItem?.createdAt || now,
             updatedAt: now,
             lastSyncedAt: now,
-            lastError: '',
-            holdingsLastSyncedAt: investments.error ? '' : now,
-            holdingsError: investments.error,
-            holdingsRefreshError: investments.refreshError
+            lastError: ''
         }
         const nextItems = [
             ...existingItems.filter((item) => item.itemId !== itemId),
@@ -789,15 +829,10 @@ export async function refreshPlaidConnection(request: HttpRequest, context: Invo
             return {
                 ...candidate,
                 accounts,
-                holdings: investments.holdings,
-                securities: investments.securities,
+                ...buildInvestmentSnapshotUpdate(candidate, investments, now, true),
                 updatedAt: now,
                 lastSyncedAt: now,
-                lastError: '',
-                holdingsLastSyncedAt: investments.error ? candidate.holdingsLastSyncedAt : now,
-                holdingsError: investments.error,
-                holdingsRefreshRequestedAt: now,
-                holdingsRefreshError: investments.refreshError
+                lastError: ''
             }
         })
 
