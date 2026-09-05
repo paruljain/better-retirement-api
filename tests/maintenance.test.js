@@ -6,11 +6,22 @@ const {
     withMaintenanceGuard
 } = require('../dist/src/lib/maintenance')
 
-test('schema validation rejects missing or stale versions after migration', () => {
+test('schema validation accepts the minimum required version and newer versions', () => {
     assert.equal(isSchemaVersionMismatch(48, 48), false)
+    assert.equal(isSchemaVersionMismatch(49, 48), false)
+    assert.equal(isSchemaVersionMismatch(100, 48), false)
+})
+
+test('schema validation rejects stale and malformed versions', () => {
     assert.equal(isSchemaVersionMismatch(47, 48), true)
-    assert.equal(isSchemaVersionMismatch(undefined, 48), true)
+    for (const version of [undefined, null, '48', '49', '', false, {}, [], NaN, Infinity, -Infinity, 48.5, -1, Number.MAX_SAFE_INTEGER + 1]) {
+        assert.equal(isSchemaVersionMismatch(version, 48), true)
+    }
+})
+
+test('schema validation does not impose a version when no minimum is configured', () => {
     assert.equal(isSchemaVersionMismatch(47, null), false)
+    assert.equal(isSchemaVersionMismatch(undefined, null), false)
 })
 
 function createRequest(method = 'GET') {

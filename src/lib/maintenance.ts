@@ -57,7 +57,11 @@ export function isSchemaVersionMismatch(
     schemaVersion: unknown,
     requiredSchemaVersion: number | null
 ): boolean {
-    return requiredSchemaVersion !== null && schemaVersion !== requiredSchemaVersion
+    if (requiredSchemaVersion === null) return false
+
+    return typeof schemaVersion !== 'number'
+        || !Number.isSafeInteger(schemaVersion)
+        || schemaVersion < requiredSchemaVersion
 }
 
 function maintenanceResponse(request: HttpRequest, config: MaintenanceConfig): HttpResponseInit {
