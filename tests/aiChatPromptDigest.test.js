@@ -2,6 +2,38 @@ const assert = require('node:assert/strict')
 const test = require('node:test')
 const { buildActivePlanPromptDigest } = require('../dist/src/lib/aiChatPromptDigest')
 
+test('Monte Carlo digest preserves current result diagnostics and distinguishes sampling uncertainty', () => {
+    const digest = buildActivePlanPromptDigest(fixture(), '', { monteCarlo: {
+        status: 'run', successRate: 90, iterations: 1000, startYear: 2026, startMonth: 9, endYear: 2062,
+        dataVersion: 'test-history', samplingInterval: { lower: 88, upper: 92 },
+        failures: { firstFailureCountsByYear: { 2040: 10, 2038: 2 }, meanCumulativeShortfall: 17570 }
+    } })
+    assert.match(digest, /Iterations: 1000/)
+    assert.match(digest, /Start Month: 9/)
+    assert.match(digest, /Data Version: test-history/)
+    assert.match(digest, /95% Sampling Range: 88.0%-92.0%/)
+    assert.match(digest, /not uncertainty about the future/)
+    assert.match(digest, /Earliest First Funding Failure Year: 2038/)
+    assert.match(digest, /Mean Cumulative Unfunded Obligations Among Failed Scenarios: 17570/)
+    assert.match(buildActivePlanPromptDigest(fixture()), /Current result unavailable/)
+    assert.doesNotMatch(buildActivePlanPromptDigest(fixture()), /has not run Monte Carlo/)
+})
+
+test('Monte Carlo digest includes investment risk settings and excludes contractual holdings', () => {
+    const user = fixture()
+    user.plans[0].accounts.push({ name: 'IRA', type: 'investment-account', modelingMode: 'detailed', holdings: [
+        { name: 'Balanced', monteCarloStockPercent: 40 },
+        { name: 'Fixed growth', includeInMonteCarlo: false },
+        { name: 'Contractual CD', assetType: 'cd' }
+    ] })
+    const settings = rows(buildActivePlanPromptDigest(user), 'Monte Carlo Investment Settings')
+    assert.equal(settings.length, 2)
+    assert.equal(settings[0].stockRiskPercentWhenEnabled, '40')
+    assert.equal(settings[0].bondRiskPercentWhenEnabled, '60')
+    assert.equal(settings[1].marketVolatilityEnabled, 'No')
+    assert.equal(settings[1].stockRiskPercentWhenEnabled, '100')
+})
+
 function fixture() {
     return { currentPlanId: 'baseline', plans: [{ id: 'baseline', planName: 'Baseline',
         institutions: [{ id: 'fidelity', name: 'Fidelity' }],

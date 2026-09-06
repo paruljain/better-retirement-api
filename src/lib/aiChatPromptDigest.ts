@@ -134,6 +134,21 @@ function isFixedIncomeHolding(holding: any): boolean {
     return holding?.assetType === 'cd' || holding?.assetType === 'individual-bond'
 }
 
+function getMonteCarloInvestmentRows(accounts: any[]): CsvRow[] {
+    return accounts.flatMap(account => {
+        if (account?.type !== 'investment-account') return []
+        const investments = account.modelingMode === 'detailed' && Array.isArray(account.holdings)
+            ? account.holdings : [account]
+        return investments.filter((item: any) => !isFixedIncomeHolding(item)).map((item: any) => {
+            const value = item.monteCarloStockPercent
+            const stockPercent = value === null || value === undefined || value === '' || !Number.isFinite(Number(value))
+                ? 100 : Math.max(0, Math.min(100, Number(value)))
+            return [account.name || '', item.name || '', item.includeInMonteCarlo === false ? 'No' : 'Yes',
+                stockPercent, 100 - stockPercent]
+        })
+    })
+}
+
 function hasOnlyFixedIncomeHoldings(account: any): boolean {
     return account?.modelingMode === 'detailed'
         && Array.isArray(account.holdings)
@@ -332,9 +347,20 @@ function formatMonteCarloSection(computedContext: unknown): string {
         return [
             'Monte Carlo',
             '-----------',
-            'Chance of Success: Not run. The user has not run Monte Carlo for this plan yet, but they can run it from the dashboard.'
+            'Chance of Success: Current result unavailable. It may be missing or stale. Run Monte Carlo from Dashboard for the current plan.'
         ].join('\n')
     }
+
+    const interval = isPlainObject(monteCarlo?.samplingInterval) ? monteCarlo.samplingInterval : null
+    const failures = isPlainObject(monteCarlo?.failures) ? monteCarlo.failures : null
+    const failureYears = isPlainObject(failures?.firstFailureCountsByYear)
+        ? Object.entries(failures.firstFailureCountsByYear)
+            .filter(([year, count]) => /^\d{4}$/.test(year) && typeof count === 'number' && count > 0)
+            .map(([year]) => year).sort()
+        : []
+    const hasInterval = typeof interval?.lower === 'number' && Number.isFinite(interval.lower)
+        && typeof interval?.upper === 'number' && Number.isFinite(interval.upper)
+        && interval.lower >= 0 && interval.upper <= 100 && interval.lower <= interval.upper
 
     return [
         'Monte Carlo',
@@ -342,8 +368,16 @@ function formatMonteCarloSection(computedContext: unknown): string {
         `Chance of Success: ${formatChanceOfSuccess(monteCarlo?.successRate) || 'N/A'}`,
         `Generated At: ${getStringValue(monteCarlo?.generatedAt) || 'N/A'}`,
         `Iterations: ${formatMaybeNumber(monteCarlo?.iterations) || 'N/A'}`,
+        `Success Definition: Funds modeled spending, required distributions, and taxes throughout the horizon, with nonnegative ending net worth. Conditional on entered assumptions; not a guarantee.`,
+        `Data Version: ${getStringValue(monteCarlo?.dataVersion) || 'N/A'}`,
         `Start Year: ${formatMaybeNumber(monteCarlo?.startYear) || 'N/A'}`,
-        `End Year: ${formatMaybeNumber(monteCarlo?.endYear) || 'N/A'}`
+        `Start Month: ${formatMaybeNumber(monteCarlo?.startMonth) || 'N/A'}`,
+        `End Year: ${formatMaybeNumber(monteCarlo?.endYear) || 'N/A'}`,
+        ...(hasInterval ? [`95% Sampling Range: ${Number(interval.lower).toFixed(1)}%-${Number(interval.upper).toFixed(1)}%. Simulation sampling noise only; not uncertainty about the future. Show only when relevant to the question.`] : []),
+        ...(failureYears.length ? [
+            `Earliest First Funding Failure Year: ${failureYears[0]}`,
+            `Mean Cumulative Unfunded Obligations Among Failed Scenarios: ${formatMaybeNumber(failures?.meanCumulativeShortfall) || 'N/A'}`
+        ] : [])
     ].join('\n')
 }
 
@@ -547,6 +581,11 @@ export function buildActivePlanPromptDigest(user: UserDocument, activePlanId = '
             'Accounts',
             ['name', 'type', 'taxStatus', 'owner', 'balance', 'basis', 'priceGrowthOrApy', 'retirementDistributionYieldOrBrokerageDividendYield'],
             getAccountRows(accounts)
+        ),
+        buildCsvBlock(
+            'Monte Carlo Investment Settings',
+            ['accountName', 'investmentName', 'marketVolatilityEnabled', 'stockRiskPercentWhenEnabled', 'bondRiskPercentWhenEnabled'],
+            getMonteCarloInvestmentRows(accounts)
         ),
         buildCsvBlock(
             'CD and Bond Holdings',
