@@ -130,6 +130,48 @@ function getAccountRows(accounts: any[]): CsvRow[] {
     ])
 }
 
+function isFixedIncomeHolding(holding: any): boolean {
+    return holding?.assetType === 'cd' || holding?.assetType === 'individual-bond'
+}
+
+function hasOnlyFixedIncomeHoldings(account: any): boolean {
+    return account?.modelingMode === 'detailed'
+        && Array.isArray(account.holdings)
+        && account.holdings.length > 0
+        && account.holdings.every(isFixedIncomeHolding)
+}
+
+function getFixedIncomeRows(accounts: any[], institutions: any[]): CsvRow[] {
+    const optionalNumber = (value: unknown): string => value === null || value === undefined || value === ''
+        ? '' : formatMaybeNumber(value)
+    const optionalBoolean = (value: unknown): string => typeof value === 'boolean' ? (value ? 'Yes' : 'No') : ''
+    return accounts.flatMap((account) => {
+        if (account?.modelingMode !== 'detailed' || !Array.isArray(account.holdings)) return []
+        const institution = institutions.find((entry) => entry?.id === account.institutionId)
+        return account.holdings.filter(isFixedIncomeHolding).map((holding: any): CsvRow => {
+            const terms = holding.fixedIncome || {}
+            const isCd = holding.assetType === 'cd'
+            const destination = accounts.find((entry) => entry?.id === terms.destinationAccountId)
+            const retained = account.taxStatus !== 'regular' || !terms.destinationAccountId
+            return [
+                account.id, institution?.name || '', account.name || '', account.accountType || account.type || '',
+                account.taxStatus || '', formatOwner(account.ownership || account.owner), holding.id || '', holding.name || '',
+                holding.assetType, isCd ? terms.cdKind || '' : terms.bondType || '',
+                optionalNumber(holding.currentValue), optionalNumber(holding.basis), optionalNumber(terms.principal),
+                isCd ? '' : optionalNumber(terms.purchaseAmount), optionalNumber(terms.rate),
+                terms.issueDate || '', terms.maturityDate || '',
+                isCd ? (typeof terms.compound === 'boolean' ? (terms.compound ? 'compound' : 'pay out') : '') : terms.bondInterestMode || '',
+                optionalNumber(terms.paymentMonths), terms.nextPaymentDate || '', terms.dayCount || '',
+                optionalNumber(terms.maturityInterest), terms.taxTiming || '', isCd ? '' : terms.taxTreatment || '',
+                isCd ? '' : terms.adjustmentTaxTiming || '', isCd ? '' : optionalNumber(terms.inflationRate),
+                optionalBoolean(terms.renewAtMaturity), optionalNumber(terms.renewalMonths), terms.renewUntilDate || '',
+                terms.destinationAccountId || '', retained ? `Cash in ${account.name || account.id}` : destination?.name || 'Unresolved destination',
+                'Held to maturity; other account cash can remain available'
+            ]
+        })
+    })
+}
+
 function getDefaultCashAccountName(accountFlow: any, accounts: any[]): string {
     const destinationId = accountFlow?.incomeDestinationAccountId
     const destination = (accounts || []).find((account) => (
@@ -194,11 +236,13 @@ function getWithdrawalOrderRows(accountFlow: any, accounts: any[]): CsvRow[] {
             account?.type || '',
             account?.taxStatus || '',
             formatOwner(account?.owner),
-            settings.enabled === false ? 'No' : 'Yes',
+            hasOnlyFixedIncomeHoldings(account) || settings.enabled === false ? 'No' : 'Yes',
             roundDollars(settings.minimumBalance),
             availableFromYearReference?.mode || '',
             availableFromYearReference?.value ?? '',
-            availableFromYearReference?.month ?? ''
+            availableFromYearReference?.month ?? '',
+            settings.enabled === false ? 'No' : 'Yes',
+            hasOnlyFixedIncomeHoldings(account) ? 'Disabled: CD/bond principal held to maturity; released cash may be used afterward' : ''
         ]
     })
 }
@@ -505,6 +549,16 @@ export function buildActivePlanPromptDigest(user: UserDocument, activePlanId = '
             getAccountRows(accounts)
         ),
         buildCsvBlock(
+            'CD and Bond Holdings',
+            ['accountId', 'institution', 'accountName', 'accountType', 'accountTaxStatus', 'owner', 'holdingId', 'holdingName',
+                'assetType', 'cdKindOrBondType', 'currentValue', 'costBasis', 'principalOrFaceValue', 'amountInvested', 'annualRatePercent',
+                'issueDate', 'maturityOrRedemptionDate', 'interestHandling', 'paymentIntervalMonthsZeroMeansMaturity', 'nextPaymentDate',
+                'dayCount', 'legacyMaturityInterestOverride', 'interestTaxTiming', 'bondInterestTaxTreatment', 'discountPremiumTaxTiming',
+                'annualInflationAdjustmentPercent', 'renewAtMaturity', 'renewalMonths', 'stopRenewingDate', 'configuredDestinationAccountId',
+                'cashDestination', 'availability'],
+            getFixedIncomeRows(accounts, Array.isArray(plan.institutions) ? plan.institutions : [])
+        ),
+        buildCsvBlock(
             'Income',
             ['name', 'category', 'owner', 'amount', 'frequency', 'growthOrInflationRate', 'startYearReferenceMode', 'startYearReferenceValue', 'startYearReferenceMonth', 'startYear', 'endYearReferenceMode', 'endYearReferenceValue', 'endYearReferenceMonth', 'endYear'],
             getCashFlowRows(incomes)
@@ -521,7 +575,7 @@ export function buildActivePlanPromptDigest(user: UserDocument, activePlanId = '
         ),
         buildCsvBlock(
             'Withdrawal Order',
-            ['order', 'accountName', 'accountType', 'taxStatus', 'owner', 'enabled', 'minimumBalance', 'availableFromYearReferenceMode', 'availableFromYearReferenceValue', 'availableFromYearReferenceMonth'],
+            ['order', 'accountName', 'accountType', 'taxStatus', 'owner', 'enabled', 'minimumBalance', 'availableFromYearReferenceMode', 'availableFromYearReferenceValue', 'availableFromYearReferenceMonth', 'savedEnabledPreference', 'disabledReason'],
             getWithdrawalOrderRows(plan.accountFlow, accounts)
         ),
         buildCsvBlock(
